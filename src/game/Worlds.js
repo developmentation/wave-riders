@@ -70,6 +70,19 @@ const lagoonLoop = loopGates(ellipse(0, 0, 270, 175), 8, 52);
 // player sees is the left island straight ahead through the crossing.
 const swellLoop = loopGates(shift(figure8(0, 0, 335, 350), 0.167), 12, 42, { avoid: [{ x: 0, z: 0, r: 60 }] });
 const stormLoop = loopGates(ellipse(0, 60, 205, 125), 7, 36);
+// Titan Swell: a 16 s swell is ~400 m crest to crest, so the oval is huge and
+// the gates sit a full spacing apart (390 m) — one gate per roller, roughly.
+const giantLoop = loopGates(ellipse(0, 0, 600, 380), 8, 32);
+// Perfect Storm: a tight bay loop tucked under the crescent's lee.
+const tempestLoop = loopGates(ellipse(0, 40, 250, 150), 6, 36);
+
+// Hub portals: six rings on an arc 135 m out. The two easy worlds sit dead
+// ahead of the start line; the rings get harder toward both ends of the arc.
+const HUB_PORTAL_R = 135;
+const hubPortal = (deg, dest) => ({
+  x: +(HUB_PORTAL_R * Math.sin(deg * DEG)).toFixed(1), z: +(HUB_PORTAL_R * Math.cos(deg * DEG)).toFixed(1),
+  heading: deg * DEG, dest,
+});
 
 const hub = {
   id: 'hub', name: 'Harbour', icon: 'anchor',
@@ -96,9 +109,12 @@ const hub = {
   gates: [],
   laps: 0,
   portals: [
-    { x: -92, z: 77, heading: -50 * DEG, dest: 'swell' },
-    { x: 0, z: 120, heading: 0, dest: 'lagoon' },
-    { x: 92, z: 77, heading: 50 * DEG, dest: 'storm' },
+    hubPortal(-75, 'storm'),
+    hubPortal(-45, 'swell'),
+    hubPortal(-15, 'lagoon'),
+    hubPortal(15, 'giant'),
+    hubPortal(45, 'tempest'),
+    hubPortal(75, 'deep'),
   ],
   bounds: 750,
 };
@@ -189,7 +205,170 @@ const storm = {
   bounds: 800,
 };
 
-export const WORLDS = { hub, lagoon, swell, storm };
+const giant = {
+  id: 'giant', name: 'Titan Swell', icon: 'giantwave',
+  weather: {
+    key: 'clear',
+    patch: {
+      // Glassy between the rollers: almost no wind sea, one enormous long-period
+      // swell. Integrates to Hs ~15 m (50 ft) with a ~400 m wavelength.
+      windSpeed: 5.5, gustiness: 0.1, swellHs: 15, swellPeriod: 16, choppiness: 0.85, spread: 0.35,
+      rain: 0, storm: 0, fog: 0.02, spray: 0.25, lightningRate: 0,
+      sunElevation: 0.9, sunAzimuth: 3.9, sunIntensity: 26, turbidity: 1.6,
+      cloudCoverage: 0.18, cloudDensity: 0.4, cloudBottom: 1800, cloudTop: 3000, cloudAnvil: 0,
+      foamStrength: 0.8,
+    },
+  },
+  // saturated deep blue: open-ocean scattering with the green held back
+  water: { scatter: [0.010, 0.050, 0.112], absorb: [0.003, 0.016, 0.034] },
+  islands: [
+    // one tall spire in the middle of the oval, two big landmarks far outside it;
+    // every gate is >= 300 m from any shore so a 400 m roller never breaks on one
+    { x: 0, z: 0, radius: 70, height: 78, seed: 51, palms: 22, hut: true },
+    { x: -1000, z: 300, radius: 115, height: 92, seed: 52, palms: 34, lighthouse: true },
+    { x: 1000, z: -300, radius: 105, height: 84, seed: 53, shape: 'plateau', palms: 30 },
+  ],
+  start: giantLoop.start,
+  gates: giantLoop.gates,
+  gateSpacing: [300, 450],
+  lapLength: giantLoop.length,
+  laps: 2,
+  portals: [{ x: -130, z: -480, heading: Math.PI, dest: 'hub' }],
+  probeSpan: 400,
+  bounds: 1400,
+};
+
+const tempest = {
+  id: 'tempest', name: 'The Perfect Storm', icon: 'tempest',
+  weather: {
+    key: 'storm',
+    patch: {
+      // Beaufort 11 base; wind sea trimmed so the total integrates to Hs ~8 m
+      windSpeed: 23, gustiness: 0.6, swellHs: 4.2, swellPeriod: 11.5, choppiness: 1.4, spread: 0.9,
+      rain: 1.0, storm: 1.0, fog: 0.5, spray: 1.4, lightningRate: 1.5,
+      // sun just under the horizon: no sunset band to face, the sky is lit by
+      // the deck's own glow and the lightning
+      sunElevation: -0.12, sunAzimuth: 2.9, sunIntensity: 6, turbidity: 7.0,
+      cloudCoverage: 0.8, cloudDensity: 1.2, cloudBottom: 480, cloudTop: 5600, cloudAnvil: 0.8,
+      foamStrength: 1.1, starIntensity: 0.35,
+    },
+  },
+  // Auto-exposure would lift a black squall to flat grey; hold it well down so it
+  // reads as night-dark while the boat and gates stay legible.
+  exposure: 0.6,
+  // thunder purple: red lifted level with green so the water goes violet-black
+  water: { scatter: [0.014, 0.018, 0.050], absorb: [0.004, 0.011, 0.020] },
+  islands: [
+    // a huge crescent wrapping the whole north side of the bay: the back straight
+    // runs in its lee, the front straight is out in the open sea. Steep shelf
+    // (shelf 0.6): an 8 m trough over a long sandy shelf grounds boats.
+    { x: 0, z: 80, radius: 120, height: 82, seed: 61, shape: 'crescent', palms: 40, warp: 0.18, detail: 0.1, shelf: 0.6,
+      arc: { r: 470, a0: 20 * DEG, a1: 160 * DEG, thick: 90 } },
+    { x: -430, z: -230, radius: 50, height: 17, seed: 62, palms: 8 },
+    { x: 440, z: -270, radius: 46, height: 15, seed: 63, palms: 6 },
+  ],
+  start: tempestLoop.start,
+  gates: tempestLoop.gates,
+  lapLength: tempestLoop.length,
+  laps: 2,
+  portals: [{ x: -110, z: -230, heading: Math.PI, dest: 'hub' }],
+  probeSpan: 300,
+  bounds: 850,
+  // Periodic drama, driven by updateWorldEvents() below. Times in seconds.
+  events: {
+    rogue: { first: 18, every: [35, 50], height: 14, radius: 200, wavelength: 320, distance: 420 },
+    spout: { first: 30, every: [75, 110], strength: 20, distance: [520, 720], minStartDist: 400 },
+    lightning: { first: 4, every: [9, 16], count: [4, 8], radius: 1500 },
+  },
+};
+
+export const WORLDS = { hub, lagoon, swell, storm, giant, tempest };
+
+// --------------------------------------------------------------- events
+/**
+ * Per-world scripted drama (rogue waves, distant waterspouts, lightning
+ * bursts) on top of the weather director's ambient state. Game.js calls
+ * `updateWorldEvents(app, def, dt)` every frame with the current world def;
+ * state lives here keyed by def.id and is reset whenever the world is rebuilt.
+ *
+ * def.events = {
+ *   rogue:     { first, every: [min, max], height, radius, wavelength, distance },
+ *   spout:     { first, every: [min, max], strength, distance: [min, max], minStartDist },
+ *   lightning: { first, every: [min, max], count: [min, max], radius },   // radius: how close the bolts land
+ * }
+ * `?eventRate=N` (dev) runs every timer N times faster.
+ */
+const eventState = new Map();
+const _camVel = new THREE.Vector3();
+const GRAVITY = 9.81;
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = (v) => (Array.isArray(v) ? rand(v[0], v[1]) : v);
+
+let eventRate = 1;
+if (typeof location !== 'undefined') {
+  const r = parseFloat(new URLSearchParams(location.search).get('eventRate') || '1');
+  if (Number.isFinite(r) && r > 0) eventRate = r;
+}
+
+export function resetWorldEvents(id) {
+  if (id === undefined) eventState.clear();
+  else eventState.delete(id);
+}
+
+export function updateWorldEvents(app, def, dt) {
+  const ev = def?.events;
+  const director = app?.director;
+  if (!ev || !director || !(dt > 0)) return;
+  let st = eventState.get(def.id);
+  if (!st) {
+    st = { time: 0, next: {} };
+    for (const k of Object.keys(ev)) st.next[k] = (ev[k].first ?? pick(ev[k].every)) / eventRate;
+    eventState.set(def.id, st);
+  }
+  st.time += dt;
+  const cam = app.camera.position;
+  const w = app.weather?.state;
+  // Smoothed camera velocity: rogue waves are aimed at where the boat is going.
+  if (!st.prev) { st.prev = cam.clone(); st.vel = new THREE.Vector3(); }
+  _camVel.copy(cam).sub(st.prev).divideScalar(dt);
+  if (_camVel.lengthSq() < 60 * 60) st.vel.lerp(_camVel, 1 - Math.exp(-dt * 2));   // ignore teleports
+  st.prev.copy(cam);
+  for (const k of Object.keys(ev)) {
+    if (st.time < st.next[k]) continue;
+    const e = ev[k];
+    st.next[k] = st.time + pick(e.every) / eventRate;
+    if (k === 'rogue') {
+      // Form the group upwind-ish of the player and send it through where the
+      // boat will be when it arrives (half the travel time of prediction).
+      const base = w?.swellAngle ?? w?.windAngle ?? 1.0;
+      const ang = base + rand(-0.9, 0.9);
+      const dist = e.distance ?? 420;
+      const wavelength = e.wavelength ?? 320;
+      const speed = Math.sqrt(GRAVITY * wavelength / (2 * Math.PI));
+      const lead = Math.min(dist / speed * 0.5, 10);
+      const tx = cam.x + st.vel.x * lead, tz = cam.z + st.vel.z * lead;
+      director.spawnRogue({
+        x: tx - Math.cos(ang) * dist, z: tz - Math.sin(ang) * dist,
+        angle: ang, height: e.height ?? 14, radius: e.radius ?? 200, wavelength, speed,
+      });
+    } else if (k === 'spout') {
+      // A distant funnel: well away from the player and from the start line.
+      const s = def.start || { x: 0, z: 0 };
+      let x = 0, z = 0;
+      for (let tries = 0; tries < 8; tries++) {
+        const ang = Math.random() * Math.PI * 2, d = pick(e.distance ?? [520, 720]);
+        x = cam.x + Math.cos(ang) * d; z = cam.z + Math.sin(ang) * d;
+        if (Math.hypot(x - s.x, z - s.z) >= (e.minStartDist ?? 400)) break;
+      }
+      director.spawnWaterspout(x, z, e.strength ?? 20);
+    } else if (k === 'lightning') {
+      const n = Math.round(pick(e.count ?? 6));
+      // closer than the director's ambient bursts so the bolts land in frame
+      if (app.lightning?.burst && e.radius) app.lightning.burst(n, { cloudBase: w?.cloudBottom ?? 600, radius: e.radius, window: 2.5 });
+      else director.lightningBurst(n);
+    }
+  }
+}
 
 // -------------------------------------------------------------- weather
 /** Full weather record for a world: preset + patch + water colour. */
@@ -219,6 +398,7 @@ export function buildWorld(id, ctx) {
   const def = WORLDS[id];
   if (!def) throw new Error(`unknown world '${id}'`);
   const atmosphere = ctx.atmosphere || ctx.app?.atmosphere;
+  resetWorldEvents(id);
   const group = new THREE.Group();
   group.name = `world-${id}`;
   const islands = buildIslands(def.islands, atmosphere, { piers: def.piers || [] });

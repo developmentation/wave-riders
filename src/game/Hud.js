@@ -38,10 +38,14 @@ export const DEFAULT_BOATS = [
 /** Catalog colours may be numeric hex (Kenney palette); CSS wants strings. */
 const cssColor = (c) => (typeof c === 'number' ? `#${c.toString(16).padStart(6, '0')}` : c);
 
+// Same left-to-right order as the portal arc in the harbour (Worlds.js hub).
 const WORLD_ICONS = [
-  { id: 'lagoon', icon: '☀️', label: 'Sunny Lagoon' },
-  { id: 'swell', icon: '🌊', label: 'Rolling Swell' },
   { id: 'storm', icon: '⛈️', label: 'Storm Run' },
+  { id: 'swell', icon: '🌊', label: 'Rolling Swell' },
+  { id: 'lagoon', icon: '☀️', label: 'Sunny Lagoon' },
+  { id: 'giant', icon: '🏔️', label: 'Titan Swell' },
+  { id: 'tempest', icon: '🌩️', label: 'The Perfect Storm' },
+  { id: 'deep', icon: '🤿', label: 'The Deep Run' },
 ];
 
 /* ---------------------------------------------------------------- icons -- */
@@ -166,7 +170,7 @@ export class Hud {
     this.virtual = { steer: 0, throttle: 0, brake: 0, boost: false, active: false };
     this._ptr = new Map();                          // pointerId -> { ctl, el }
     this._wheel = { angle: 0, dragging: false, lastA: 0 };
-    this._held = { left: false, right: false, throttle: false, brake: false, boost: false, horn: false };
+    this._held = { left: false, right: false, throttle: false, brake: false, boost: false, horn: false, up: false, down: false };
     this._wrongT = 0;
     this._hintShown = false;
     this._toastQ = [];
@@ -240,6 +244,7 @@ export class Hud {
         <div class="wr-badge wr-timer"><span class="wr-tile">${ICON.clock}</span><span class="wr-val wr-txt wr-timer-t">00:00.0</span></div>
       </div>
       <div class="wr-speedo">${speedoSvg()}</div>
+      <div class="wr-depth wr-badge"><span class="wr-tile">🤿</span><span class="wr-val wr-txt"><b class="wr-depth-val">0</b> <small>m deep</small></span></div>
       <div class="wr-countdown"><div class="wr-count-n wr-txt"></div></div>`);
     race.dataset.screen = 'race';
 
@@ -289,6 +294,10 @@ export class Hud {
           <button class="wr-arrowbtn wr-arrow-l" data-ctl="left" aria-label="Steer left">${ICON.left}</button>
           <button class="wr-arrowbtn wr-arrow-r" data-ctl="right" aria-label="Steer right">${ICON.right}</button>
         </div>
+        <div class="wr-dive">
+          <button class="wr-arrowbtn wr-dive-up" data-ctl="up" aria-label="Rise">${ICON.left}</button>
+          <button class="wr-arrowbtn wr-dive-down" data-ctl="down" aria-label="Dive">${ICON.left}</button>
+        </div>
       </div>
       <div class="wr-right">
         <button class="wr-round wr-horn" data-ctl="horn" aria-label="Horn">${ICON.horn}</button>
@@ -310,6 +319,7 @@ export class Hud {
       cards: q('.wr-cards'), swatches: q('.wr-swatches'),
       posN: q('.wr-pos-n'), posOf: q('.wr-pos-of'), lapN: q('.wr-lap-n'), lapOf: q('.wr-lap-of'), timer: q('.wr-timer-t'),
       gate: q('.wr-gate'), wrong: q('.wr-wrongway'), needle: q('.wr-needle'), digit: q('.wr-speedo-digit'),
+      depthVal: q('.wr-depth-val'),
       countdown: q('.wr-countdown'), countN: q('.wr-count-n'),
       resultsPlace: q('.wr-results-place'), resultsTime: q('.wr-results-time'), resultsBest: q('.wr-results-best'),
       stars: [...r.querySelectorAll('.wr-star')], confetti: q('.wr-confetti'),
@@ -587,6 +597,13 @@ export class Hud {
     const t = fmtTime(f.time);
     if (t !== c.time) { c.time = t; e.timer.textContent = t; }
 
+    // Submarine mode: depth gauge + dive buttons.
+    const sub = !!f.submerged;
+    if (sub !== this._c.sub) { this._c.sub = sub; this.root.classList.toggle('wr-sub', sub); }
+    if (sub) {
+      const d = Math.round(f.depth || 0);
+      if (d !== this._c.depth) { this._c.depth = d; if (this.el.depthVal) this.el.depthVal.textContent = String(d); }
+    }
     const kmh = Math.round(f.speedKmh || 0);
     if (kmh !== c.kmh) {
       c.kmh = kmh;
@@ -703,7 +720,8 @@ export class Hud {
     v.throttle = h.throttle ? 1 : 0;
     v.brake = h.brake ? 1 : 0;
     v.boost = h.boost;
-    v.active = h.throttle || h.brake || h.boost || h.left || h.right || this._wheel.dragging || Math.abs(wheelSteer) > 0.02;
+    v.dive = (h.up ? 1 : 0) - (h.down ? 1 : 0);
+    v.active = h.throttle || h.brake || h.boost || h.left || h.right || h.up || h.down || this._wheel.dragging || Math.abs(wheelSteer) > 0.02;
     this.game?.controls?.setVirtual?.(v);
   }
 

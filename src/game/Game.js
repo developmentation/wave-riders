@@ -312,7 +312,7 @@ export class Game {
         for (const b of this.boats) { b.body.groundFn = this.world.heightAt || null; if (b !== this.player) this.wake?.attach?.(b); }
         this.state = 'race';
         this.hud?.show('race');
-        this.audio?.setMusicMood?.(id === 'storm' ? 'storm' : 'race');
+        this.audio?.setMusicMood?.(id === 'storm' || id === 'tempest' ? 'storm' : 'race');
         this.audio?.music?.(true);
         this.race.start?.();
       } else {

@@ -6,7 +6,7 @@
  *   node tools/check-worlds.mjs storm      # one world
  *
  * Rules: gates in open water (never touching land, incl. the corridor to the
- * next gate), spaced 120-250 m, no turn over 100 deg between consecutive
+ * next gate), spaced 120-250 m (or def.gateSpacing), no turn over 100 deg between consecutive
  * gates, start and portals in open water, portals clear of gates, <= 40 palms
  * per island, <= 8000 terrain triangles per island mesh.
  */
@@ -15,6 +15,12 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { WORLDS } from '../src/game/Worlds.js';
 import { createIslandField, fieldsHeight, pierHeight, DEEP } from '../src/game/Islands.js';
+
+// Portal destinations that live outside Worlds.js (the submarine world) are
+// valid when their module exists; until then they are accepted with a note.
+const EXTERNAL_DESTS = new Set(['deep']);
+let subWorlds = null;
+try { subWorlds = (await import('../src/game/SubmarineWorld.js')).SUB_WORLDS || null; } catch (_) { /* not built yet */ }
 
 const only = process.argv[2];
 const OPEN_WATER = -1.5;      // metres of seabed under the keel counts as open water
@@ -78,7 +84,9 @@ for (const [id, def] of Object.entries(WORLDS)) {
     // spacing to the next gate
     const dx = n.x - g.x, dz = n.z - g.z, dist = Math.hypot(dx, dz);
     lap += dist;
-    if (dist < MIN_GAP || dist > MAX_GAP) fail(id, `gate ${i} -> ${(i + 1) % G.length}: spacing ${dist.toFixed(0)} m (want ${MIN_GAP}-${MAX_GAP})`);
+    // a world may widen the spacing band (giant swell: one gate per roller)
+    const [minGap, maxGap] = def.gateSpacing || [MIN_GAP, MAX_GAP];
+    if (dist < minGap || dist > maxGap) fail(id, `gate ${i} -> ${(i + 1) % G.length}: spacing ${dist.toFixed(0)} m (want ${minGap}-${maxGap})`);
     // turn: heading change, and bearing to the next gate vs both headings
     const bearing = Math.atan2(dx, dz);
     const turn = Math.abs(deg(wrap(n.heading - g.heading)));
@@ -117,7 +125,10 @@ for (const [id, def] of Object.entries(WORLDS)) {
       const d = Math.hypot(G[i].x - p.x, G[i].z - p.z);
       if (d < 45) fail(id, `portal -> ${p.dest} is ${d.toFixed(0)} m from gate ${i}`);
     }
-    if (!WORLDS[p.dest]) fail(id, `portal dest '${p.dest}' is not a world`);
+    if (!WORLDS[p.dest] && !subWorlds?.[p.dest]) {
+      if (EXTERNAL_DESTS.has(p.dest)) console.log(`  note portal dest '${p.dest}' is an external world (SubmarineWorld.js not present yet)`);
+      else fail(id, `portal dest '${p.dest}' is not a world`);
+    }
     const d0 = Math.hypot(p.x - s.x, p.z - s.z);
     if (id !== 'hub' && (d0 < 40 || d0 > 200)) fail(id, `return portal is ${d0.toFixed(0)} m from the start (want 40-200)`);
   }

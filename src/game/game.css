@@ -312,6 +312,15 @@
 .wr-wheel svg { will-change: transform; transition: none; }
 .wr-wheel.is-down { cursor: grabbing; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 14px rgba(255, 216, 77, 0.6)); }
 .wr-arrows { display: flex; gap: clamp(10px, 2vmin, 24px); }
+/* Submarine dive buttons: stacked ▲▼, only in submarine mode. */
+.wr-dive { display: none; flex-direction: column; gap: clamp(8px, 1.5vmin, 18px); }
+#hud.wr-sub .wr-dive { display: flex; }
+.wr-dive .wr-dive-up svg { transform: rotate(90deg); }
+.wr-dive .wr-dive-down svg { transform: rotate(-90deg); }
+.wr-dive .wr-arrowbtn { background: linear-gradient(180deg, #7fe8ff, #1fb6e6 55%, #0a7fbf); box-shadow: 0 0.22em 0 #04486e, 0 0.5em 1.2em rgba(0, 0, 0, 0.35), inset 0 0.08em 0 rgba(255, 255, 255, 0.6); }
+/* Depth gauge beside the speedometer. */
+.wr-depth { position: absolute; display: none; left: calc(50% + clamp(90px, 15vmin, 150px)); bottom: calc(var(--sab) + var(--pad) * 0.6 + clamp(40px, 7vmin, 80px)); font-size: clamp(18px, 3.2vmin, 34px); }
+#hud.wr-sub[data-screen="race"] .wr-depth, #hud.wr-sub[data-screen="hub"] .wr-depth { display: inline-flex; }
 .wr-arrowbtn {
   width: var(--btn); height: var(--btn); padding: calc(var(--btn) * 0.16);
   border-radius: clamp(16px, 3vmin, 30px);

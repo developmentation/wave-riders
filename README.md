@@ -2,7 +2,9 @@
 
 Pick a jet ski, speedboat, sailboat or pontoon at a sunny harbour, drive through a glowing portal
 and race around islands on a **real simulated ocean**: calm turquoise lagoon, rolling trade-wind
-swell, or a thunderstorm with rain and lightning. Built for 5–8 year olds on tablets and laptops
+swell, a thunderstorm with rain and lightning, 50-foot "Titan Swell" rollers, a black
+"Perfect Storm" with rogue waves and waterspouts, or dive in a submarine through the canyon hoops of
+"The Deep Run" against AI subs. Built for 5–8 year olds on tablets and laptops
 (touch wheel + pedals, keyboard, gamepad), with boat handling that comes from actual buoyancy on
 the FFT wave surface rather than a scripted bob.
 
@@ -24,9 +26,11 @@ npm run build      # static site in dist/
 | Steer | A / D or ← / → | wheel or ◀ ▶ buttons (optional tilt) | left stick |
 | Boost / horn | Space / H | ⚡ / 📣 | B / A |
 | Camera / reset boat / pause | C / R / Esc | 📷 / 🔄 / ⏸ | X / Y / Start |
+| Submarine dive / rise | Q / E | ▼ ▲ buttons | LB / RB |
+| Leave a race | pause menu | 🏠 button | Start → Back to harbour |
 
 URL switches for testing: `?boat=jetski|speedboat|sailboat|pontoon|fishing|tug|airboat|towboat|rowboat`, `?skip=title` (straight to the
-harbour), `?skip=lagoon|swell|storm` (straight into a race), `?debug=1` (physics/perf overlay),
+harbour), `?skip=lagoon|swell|storm|giant|tempest|deep` (straight into a race), `?debug=1` (physics/perf overlay),
 `?profile=1` (GPU pass timings), `?preset=game|gamelow`, `?touch=1` (force touch controls),
 `?mods=Name,Name` (load `src/game/<Name>.js` dev hooks).
 

@@ -74,7 +74,9 @@ const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 /**
  * Analytic island profile in metres above mean sea level.
  * def: { x, z, radius, height, seed, shape: 'cone'|'plateau'|'crescent', warp, detail,
- *        arc: { r, a0, a1, thick } (crescent only; angles in radians measured atan2(z, x)) }
+ *        arc: { r, a0, a1, thick } (crescent only; angles in radians measured atan2(z, x)),
+ *        shelf (default 1; < 1 = a steeper, shorter sandy shelf and an earlier drop-off,
+ *        so big seas do not ground boats or expose the seabed far from the beach) }
  */
 export function islandProfile(def, x, z) {
   const px = x - def.x, pz = z - def.z;
@@ -111,9 +113,10 @@ export function islandProfile(def, x, z) {
     const df = 4.5 / scale;
     h += def.height * (def.detail ?? 0.16) * fbm(px * df, pz * df, def.seed + 7, 4) * Math.min(1, core * 3) * hmul;
   } else {
-    // sandy shelf: 16% grade to -6 m, then the drop-off
-    h = Math.max(core * scale * 0.16, -6);
-    const t = smoothstep(1.7, 2.6, d);
+    // sandy shelf: 16% grade to -6 m, then the drop-off (both scaled by def.shelf)
+    const shelf = def.shelf ?? 1;
+    h = Math.max(core * scale * 0.16 / shelf, -6);
+    const t = smoothstep(1 + 0.7 * shelf, 1 + 1.6 * shelf, d);
     h = h * (1 - t) + DEEP * t;
   }
   // beach terrace: flatten the slope through the waterline

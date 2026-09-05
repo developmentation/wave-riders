@@ -33,6 +33,10 @@ export const PORTAL_TINTS = {
   lagoon: { tint: 0xffd84d, deep: 0xff8a1a, label: 'Sunny Lagoon' },
   swell: { tint: 0x4ff0ff, deep: 0x1a6cff, label: 'Rolling Swell' },
   storm: { tint: 0xc07cff, deep: 0x6a2bff, label: 'Storm Run' },
+  giant: { tint: 0x3d7bff, deep: 0x0b2a9c, label: 'Titan Swell' },
+  // near-black purple heart with an electric violet rim
+  tempest: { tint: 0xb48cff, deep: 0x160722, label: 'The Perfect Storm' },
+  deep: { tint: 0x3fe6d2, deep: 0x0b4a7a, label: 'The Deep Run' },
 };
 
 // ----------------------------------------------------------------- shaders
@@ -315,7 +319,85 @@ function stormIcon() {
   return [{ geom: mergeGeometries(parts, false) }, { geom: paint(b, 0xfff36b), emissive: 0xffd040 }];
 }
 
-const ICON_BUILDERS = { lagoon: sunIcon, swell: waveIcon, storm: stormIcon, hub: sunIcon };
+function giantWaveIcon() {
+  // A breaking roller: a thick curl (torus arc) rearing over a sloped face,
+  // with a fat white lip so the "huge wave" reads from the start line.
+  const parts = [];
+  const curl = new THREE.TorusGeometry(1.55, 0.55, 12, 28, Math.PI * 1.25);
+  curl.rotateZ(Math.PI * 0.55);
+  curl.translate(0.35, 1.05, 0);
+  parts.push(paint(curl, 0x2f6bff));
+  // the face: a wedge rising from the trough into the curl
+  const face = new THREE.Shape();
+  [[-2.7, -1.35], [1.9, -1.35], [1.9, -0.5], [0.4, 0.95], [-0.9, 0.35], [-2.7, -0.55]]
+    .forEach(([x, y], i) => (i === 0 ? face.moveTo(x, y) : face.lineTo(x, y)));
+  face.closePath();
+  const f = new THREE.ExtrudeGeometry(face, { depth: 0.6, bevelEnabled: false });
+  f.translate(0, 0, -0.3);
+  parts.push(paint(f, 0x1e4fd6));
+  // foam lip along the top of the curl
+  const lip = [[-0.95, 2.05, 0.42], [-0.3, 2.45, 0.5], [0.45, 2.6, 0.5], [1.15, 2.4, 0.42], [1.7, 1.95, 0.36]];
+  const foam = lip.map(([x, y, r]) => { const s = new THREE.SphereGeometry(r, 12, 8); s.translate(x, y, 0); return paint(s, 0xffffff); });
+  return [{ geom: mergeGeometries(parts, false) }, { geom: mergeGeometries(foam, false), emissive: 0xdfe8ff }];
+}
+
+function tempestIcon() {
+  // Black thunderhead with two bolts: a darker, angrier cousin of stormIcon.
+  const blobs = [[0, 0, 0, 1.1], [-1.25, -0.2, 0.1, 0.8], [1.2, -0.15, -0.1, 0.85], [0.3, 0.6, 0.25, 0.75], [-0.5, 0.45, -0.2, 0.6]];
+  const parts = blobs.map(([x, y, z, r]) => {
+    const s = new THREE.SphereGeometry(r, 16, 12);
+    s.translate(x, y + 1.5, z);
+    return paint(s, 0x3a2a5c);
+  });
+  const boltGeom = (dx, scale) => {
+    const bolt = new THREE.Shape();
+    [[0.5, 0.3], [-0.7, -1.3], [0.15, -1.3], [-0.75, -3.1], [1.05, -1.05], [0.25, -1.05], [1.15, 0.3]]
+      .forEach(([x, y], i) => (i === 0 ? bolt.moveTo(x * scale + dx, y * scale) : bolt.lineTo(x * scale + dx, y * scale)));
+    bolt.closePath();
+    const b = new THREE.ExtrudeGeometry(bolt, { depth: 0.45, bevelEnabled: false });
+    b.translate(0, 0.6, -0.22);
+    return b;
+  };
+  const bolts = mergeGeometries([paint(boltGeom(-0.95, 0.95), 0xfff36b), paint(boltGeom(0.75, 0.75), 0xe6dcff)], false);
+  return [{ geom: mergeGeometries(parts, false) }, { geom: bolts, emissive: 0xffe066 }];
+}
+
+function submarineIcon() {
+  // A chubby sub: capsule hull, conning tower, periscope, tail fins and a
+  // trail of bubbles rising off the bow.
+  const parts = [];
+  const hull = new THREE.CapsuleGeometry(0.75, 2.6, 6, 16);
+  hull.rotateZ(Math.PI / 2);
+  parts.push(paint(hull, 0xffb43c));
+  const tower = new THREE.BoxGeometry(1.0, 0.75, 0.7);
+  tower.translate(0.15, 0.95, 0);
+  parts.push(paint(tower, 0xff9a1a));
+  const scope = new THREE.CylinderGeometry(0.09, 0.09, 0.8, 8);
+  scope.translate(0.35, 1.7, 0);
+  parts.push(paint(scope, 0x404a5c));
+  const scopeTop = new THREE.BoxGeometry(0.42, 0.16, 0.16);
+  scopeTop.translate(0.5, 2.05, 0);
+  parts.push(paint(scopeTop, 0x404a5c));
+  const finV = new THREE.BoxGeometry(0.5, 1.3, 0.14);
+  finV.translate(-1.85, 0.1, 0);
+  parts.push(paint(finV, 0xff9a1a));
+  const finH = new THREE.BoxGeometry(0.5, 0.14, 1.3);
+  finH.translate(-1.85, 0, 0);
+  parts.push(paint(finH, 0xff9a1a));
+  const port = new THREE.CylinderGeometry(0.22, 0.22, 0.2, 12);
+  port.rotateX(Math.PI / 2);
+  port.translate(0.9, 0.05, 0.72);
+  parts.push(paint(port, 0x8ff3ff));
+  const bubbles = [[2.2, 0.9, 0.22], [2.55, 1.5, 0.16], [2.75, 2.05, 0.12]].map(([x, y, r]) => {
+    const s = new THREE.SphereGeometry(r, 10, 8); s.translate(x, y, 0); return paint(s, 0xffffff);
+  });
+  return [{ geom: mergeGeometries(parts, false) }, { geom: mergeGeometries(bubbles, false), emissive: 0x9ffcff }];
+}
+
+const ICON_BUILDERS = {
+  lagoon: sunIcon, swell: waveIcon, storm: stormIcon, hub: sunIcon,
+  giant: giantWaveIcon, tempest: tempestIcon, deep: submarineIcon,
+};
 
 // ----------------------------------------------------------------- portals
 const _p = new THREE.Vector3();
