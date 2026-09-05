@@ -186,8 +186,11 @@ void main(){
 }
 `;
 
-function bake(renderer, frag, w, h, uniforms = {}, type = THREE.UnsignedByteType) {
-  const rt = makeRT(w, h, { type, wrap: THREE.RepeatWrapping, name: 'bake' });
+function bake(renderer, frag, w, h, uniforms = {}, type = THREE.UnsignedByteType, opts = {}) {
+  // Filtering has to be decided when the target is created: three.js ignores
+  // minFilter/generateMipmaps/anisotropy changed on a render-target texture
+  // afterwards, so the tiles used to be sampled unfiltered at full resolution.
+  const rt = makeRT(w, h, { type, wrap: THREE.RepeatWrapping, name: 'bake', ...opts });
   const pass = new FullScreenPass(frag, uniforms, { name: 'bake' });
   pass.render(renderer, rt);
   pass.dispose();
@@ -240,15 +243,16 @@ function atlasTo3D(renderer, rt, res, tilesX, tilesY) {
   return tex;
 }
 
-export async function bakeProceduralTextures(renderer, onProgress = () => {}) {
+export async function bakeProceduralTextures(renderer, onProgress = () => {}, maxAniso = 16) {
   const out = {};
   const yieldFrame = () => new Promise(r => setTimeout(r, 0));
 
-  const aniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  const aniso = Math.min(maxAniso, renderer.capabilities.getMaxAnisotropy());
+  const filtered = { mipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, anisotropy: aniso };
 
   onProgress('baking foam & bubble rafts');
   await yieldFrame();
-  const foamRT = bake(renderer, FOAM_FRAG, 2048, 2048);
+  const foamRT = bake(renderer, FOAM_FRAG, 2048, 2048, {}, THREE.UnsignedByteType, filtered);
   foamRT.texture.wrapS = foamRT.texture.wrapT = THREE.RepeatWrapping;
   foamRT.texture.minFilter = THREE.LinearMipmapLinearFilter;
   foamRT.texture.generateMipmaps = true;
@@ -262,7 +266,7 @@ export async function bakeProceduralTextures(renderer, onProgress = () => {}) {
   const RIPPLE_RES = 1024;
   const rippleRT = bake(renderer, RIPPLE_FRAG, RIPPLE_RES, RIPPLE_RES, {
     uRes: { value: RIPPLE_RES }, uSlope: { value: 0.030 },
-  });
+  }, THREE.UnsignedByteType, filtered);
   rippleRT.texture.wrapS = rippleRT.texture.wrapT = THREE.RepeatWrapping;
   rippleRT.texture.minFilter = THREE.LinearMipmapLinearFilter;
   rippleRT.texture.generateMipmaps = true;

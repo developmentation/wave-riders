@@ -255,7 +255,8 @@ export class Race {
   nextGateDir() {
     const p = this.player, gate = this.gates[p?.nextGate ?? 0];
     if (!p || !gate) return 0;
-    return wrapAngle(bearing(p.body.position.x, p.body.position.z, gate.x, gate.z) - p.body.heading);
+    // heading grows toward +X, which is the boat's visual LEFT; negate for "+right".
+    return -wrapAngle(bearing(p.body.position.x, p.body.position.z, gate.x, gate.z) - p.body.heading);
   }
 
   // -------------------------------------------------------------- course
@@ -524,7 +525,8 @@ export class Race {
     const err = wrapAngle(desired - b.heading);
     const kp = ai.gain * THREE.MathUtils.clamp(1.35 - 0.55 * speedK, 0.75, 1.35);
     const yawRate = b.angular.y;
-    let steer = THREE.MathUtils.clamp(kp * err - ai.damp * yawRate, -1, 1);
+    // Positive heading error = target toward +X = visual left = negative steer.
+    let steer = -THREE.MathUtils.clamp(kp * err - ai.damp * yawRate, -1, 1);
     r.steer += (steer - r.steer) * (1 - Math.exp(-dt * 7));
     b.steer = r.steer;
 

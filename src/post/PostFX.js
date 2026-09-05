@@ -35,6 +35,18 @@ vec3 sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texSize) {
   vec2 texPos3 = (texPos1 + 2.0) / texSize;
   vec2 texPos12 = (texPos1 + offset12) / texSize;
   vec3 result = vec3(0.0);
+#ifdef LITE
+  // Five taps: the four corner samples carry the product of two edge weights,
+  // a couple of percent of the filter, and are dropped with the remainder
+  // renormalised (the usual games trade for Catmull-Rom history).
+  result += texture(tex, vec2(texPos12.x, texPos0.y)).rgb * w12.x * w0.y;
+  result += texture(tex, vec2(texPos0.x, texPos12.y)).rgb * w0.x * w12.y;
+  result += texture(tex, vec2(texPos12.x, texPos12.y)).rgb * w12.x * w12.y;
+  result += texture(tex, vec2(texPos3.x, texPos12.y)).rgb * w3.x * w12.y;
+  result += texture(tex, vec2(texPos12.x, texPos3.y)).rgb * w12.x * w3.y;
+  float wsum = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  result /= max(wsum, 1e-5);
+#else
   result += texture(tex, vec2(texPos0.x, texPos0.y)).rgb * w0.x * w0.y;
   result += texture(tex, vec2(texPos12.x, texPos0.y)).rgb * w12.x * w0.y;
   result += texture(tex, vec2(texPos3.x, texPos0.y)).rgb * w3.x * w0.y;
@@ -44,21 +56,33 @@ vec3 sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texSize) {
   result += texture(tex, vec2(texPos0.x, texPos3.y)).rgb * w0.x * w3.y;
   result += texture(tex, vec2(texPos12.x, texPos3.y)).rgb * w12.x * w3.y;
   result += texture(tex, vec2(texPos3.x, texPos3.y)).rgb * w3.x * w3.y;
+#endif
   return max(result, vec3(0.0));
 }
 
 void main(){
   vec2 texSize = 1.0 / uInvResolution;
 
-  // velocity dilation: pick the closest fragment in a 3x3 neighbourhood
-  vec2 bestVel = texture(uVelocity, vUv).xy;
-  float bestDepth = texture(uVelocity, vUv).z;
+  // velocity dilation: pick the closest fragment in the neighbourhood
+  vec4 v0 = texture(uVelocity, vUv);
+  vec2 bestVel = v0.xy;
+  float bestDepth = v0.z;
+#ifdef LITE
+  // A cross instead of the full 3x3: the dilation only has to reach one pixel
+  // past a silhouette, which the four edge neighbours do.
+  for (int i = 0; i < 4; i++) {
+    vec2 o = (i == 0) ? vec2(-1.0, 0.0) : (i == 1) ? vec2(1.0, 0.0) : (i == 2) ? vec2(0.0, -1.0) : vec2(0.0, 1.0);
+    vec4 s = texture(uVelocity, vUv + o * uInvResolution);
+    if (s.z < bestDepth) { bestDepth = s.z; bestVel = s.xy; }
+  }
+#else
   for (int y = -1; y <= 1; y++)
   for (int x = -1; x <= 1; x++) {
     if (x == 0 && y == 0) continue;
     vec4 s = texture(uVelocity, vUv + vec2(float(x), float(y)) * uInvResolution);
     if (s.z < bestDepth) { bestDepth = s.z; bestVel = s.xy; }
   }
+#endif
 
   vec3 cur = texture(uCurrent, vUv).rgb;
 
@@ -423,11 +447,21 @@ void main(){
   }
   float exposure = texture(uExposure, vec2(0.5)).r * uExposureBias;
 
-  vec3 col = (uChromatic > 0.0001) ? sampleChromatic(vUv, uChromatic) : texture(uColor, vUv).rgb;
+  // A real branch, not a select: with the fetches in both arms of a ternary the
+  // HLSL compiler is free to issue all four taps and pick afterwards.
+  vec3 col;
+  if (uChromatic > 0.0001) col = sampleChromatic(vUv, uChromatic);
+  else col = texture(uColor, vUv).rgb;
 
-  vec3 bloom = texture(uBloom, vUv).rgb;
-  float dirt = lensDirt(vUv);
-  col += bloom * uBloomStrength * (1.0 + dirt * uWetLens * 3.0);
+  // The dirt mask is thirty-odd hashes of procedural noise per pixel and it is
+  // multiplied by uWetLens, which is zero except for a few seconds after the
+  // lens has been under water. Only evaluate it when it can change the pixel;
+  // the result is identical, dirt * 0 being 0.
+  if (uBloomStrength > 0.0) {
+    vec3 bloom = texture(uBloom, vUv).rgb;
+    float dirt = uWetLens > 0.0001 ? lensDirt(vUv) : 0.0;
+    col += bloom * uBloomStrength * (1.0 + dirt * uWetLens * 3.0);
+  }
 
   col *= exposure;
   col += uFlash * uFlashColor * exposure;
@@ -500,10 +534,19 @@ const HALT = [
 ];
 
 export class PostFX {
-  constructor(renderer, width, height) {
+  /**
+   * @param opts.lite Game mode. The design budget for the boat game is TAA and
+   *   sharpening only: no depth of field, no motion blur. The `game` quality
+   *   preset says as much, but nothing ever copied those flags into these
+   *   settings, so the game had been paying for a full-res motion blur, a CoC
+   *   pass, a 43-tap bokeh and a DoF composite on every frame. Lite mode turns
+   *   them off and does not allocate their targets.
+   */
+  constructor(renderer, width, height, opts = {}) {
     this.renderer = renderer;
     this.width = width; this.height = height;
     this.frame = 0;
+    this.lite = !!opts.lite;
 
     this.settings = {
       taa: true,
@@ -541,6 +584,7 @@ export class PostFX {
       fixedExposureMix: 1,
       sharpen: 0.45,
     };
+    if (this.lite) { this.settings.dof = false; this.settings.motionBlur = false; }
     this.flashColor = new THREE.Vector3(0.8, 0.88, 1.0);
 
     this._build(width, height);
@@ -550,11 +594,18 @@ export class PostFX {
     const half = { type: THREE.HalfFloatType };
     this.taaHistory = new PingPong(w, h, { ...half, name: 'taaHist' });
     this.sceneResolved = makeRT(w, h, { ...half, name: 'resolved' });
-    this.tmpA = makeRT(w, h, { ...half, name: 'tmpA' });
-    this.tmpB = makeRT(w, h, { ...half, name: 'tmpB' });
-    this.cocRT = makeRT(w, h, { ...half, name: 'coc', minFilter: THREE.LinearFilter });
+    // Motion blur and depth of field scratch. Lite mode never runs either
+    // pass, and four more full-resolution half-float targets are real memory
+    // on an integrated GPU.
     this.dofW = Math.max(2, w >> 1); this.dofH = Math.max(2, h >> 1);
-    this.dofRT = makeRT(this.dofW, this.dofH, { ...half, name: 'dof' });
+    if (this.lite) {
+      this.tmpA = this.tmpB = this.cocRT = this.dofRT = null;
+    } else {
+      this.tmpA = makeRT(w, h, { ...half, name: 'tmpA' });
+      this.tmpB = makeRT(w, h, { ...half, name: 'tmpB' });
+      this.cocRT = makeRT(w, h, { ...half, name: 'coc', minFilter: THREE.LinearFilter });
+      this.dofRT = makeRT(this.dofW, this.dofH, { ...half, name: 'dof' });
+    }
     this.ldrRT = makeRT(w, h, { type: THREE.UnsignedByteType, name: 'ldr' });
 
     // luminance reduction chain (float so it can be read back for diagnostics)
@@ -637,6 +688,9 @@ export class PostFX {
           uSrc: { value: null }, uInvResolution: { value: new THREE.Vector2() }, uSharpness: { value: 0.5 },
         }, { name: 'cas' }),
       };
+      // Lite TAA: 5-tap cross dilation and 5-tap Catmull-Rom history instead
+      // of 9 and 9. Same clipping neighbourhood, same blend; 27 -> 19 taps.
+      if (this.lite) this.passes.taa.define('LITE', 1);
     }
     this.reset = true;
   }
@@ -702,7 +756,7 @@ export class PostFX {
     this.exposureRT.swap();
 
     // -------------------------------------------------------- motion blur
-    if (s.motionBlur && s.motionBlurStrength > 0.001) {
+    if (s.motionBlur && s.motionBlurStrength > 0.001 && this.tmpA) {
       p.motionBlur.set('uColor', color).set('uVelocity', velTex)
         .set('uStrength', s.motionBlurStrength).set('uFrame', this.frame);
       p.motionBlur.uniforms.uInvResolution.value.set(inv[0], inv[1]);
@@ -711,7 +765,7 @@ export class PostFX {
     }
 
     // ---------------------------------------------------------------- DOF
-    if (s.dof) {
+    if (s.dof && this.cocRT) {
       p.coc.set('uVelocity', velTex).set('uFocusDist', s.focusDistance)
         .set('uFocalLength', s.focalLength).set('uAperture', s.aperture).set('uMaxCoc', 1.0);
       p.coc.render(r, this.cocRT);

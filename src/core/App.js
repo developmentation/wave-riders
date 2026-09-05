@@ -75,7 +75,8 @@ export class App {
     this.quality.onDowngrade = (name, scale) => this.setQualityPreset(name, scale);
 
     this.onProgress('baking procedural textures', 0.08);
-    this.textures = await bakeProceduralTextures(renderer, (m) => this.onProgress(m, 0.1));
+    // 4x anisotropy is indistinguishable at gameplay range and measurably cheaper on iGPUs.
+    this.textures = await bakeProceduralTextures(renderer, (m) => this.onProgress(m, 0.1), this.surfaceOnly ? 4 : 16);
     U.uFoamTex.value = this.textures.foam;
     U.uRippleTex.value = this.textures.ripple;
     U.uCurlTex.value = this.textures.curl;
@@ -94,7 +95,7 @@ export class App {
     this.clouds = new Clouds(renderer, this.atmosphere, this.textures, this.quality);
 
     this.onProgress('tessellating ocean', 0.7);
-    this.oceanMesh = new OceanMesh(this.ocean, this.atmosphere, this.quality, this.clouds.shared);
+    this.oceanMesh = new OceanMesh(this.ocean, this.atmosphere, this.quality, this.clouds.shared, { lite: this.surfaceOnly });
 
     this.lightning = new Lightning();
     this.waterspout = new Waterspout();
@@ -132,7 +133,8 @@ export class App {
 
     this.onProgress('warming shaders', 0.94);
     this.ocean.update(1 / 60);
-    this.atmosphere.update(this.camera, this.camera.position);
+    // Game mode: the sky-view and aerial LUTs change slowly (sun, camera height); refresh on alternate frames.
+    if (!this.surfaceOnly || (this.frame & 1) === 0 || this.frame < 10) this.atmosphere.update(this.camera, this.camera.position);
     this.sky.renderEnv();
     // Surface shaders compile on the first surface visit. Compiling the full
     // storm pipeline before a reef dive makes the first encounter needlessly slow.
@@ -178,7 +180,7 @@ export class App {
     this.waterRT?.dispose();
     this.waterRT=makeRT(w,h,{type:THREE.HalfFloatType,count:2,depthBuffer:true,name:'connected-underwater'});
 
-    if (!this.post) this.post = new PostFX(this.renderer, w, h);
+    if (!this.post) this.post = new PostFX(this.renderer, w, h, { lite: this.surfaceOnly });
     else this.post.setSize(w, h);
     this.clouds?.setSize(w, h);
 

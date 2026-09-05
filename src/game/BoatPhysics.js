@@ -24,7 +24,7 @@ const _sample = new THREE.Vector3();
 export const HULLS = {
   jetski: {
     length: 3.3, width: 1.25, mass: 380, draft: 0.32,
-    thrust: 5200, maxSpeed: 22, steerTorque: 1.15, rudderLift: 0.9,
+    thrust: 5200, maxSpeed: 22, steerTorque: 0.6, rudderLift: 0.25, maxYaw: 1.5,
     dragLong: 0.055, dragLat: 1.2, planing: 0.85, roll: 1.6, bounce: 1.3,
     // Point height = -draft/1.35 puts the body origin at the resting waterline.
     buoyancyPoints: [[0, -0.24, 1.35], [-0.5, -0.24, -0.2], [0.5, -0.24, -0.2], [-0.45, -0.24, -1.4], [0.45, -0.24, -1.4]],
@@ -32,21 +32,21 @@ export const HULLS = {
   },
   speedboat: {
     length: 6.4, width: 2.3, mass: 1500, draft: 0.5,
-    thrust: 18000, maxSpeed: 28, steerTorque: 0.75, rudderLift: 0.7,
+    thrust: 18000, maxSpeed: 28, steerTorque: 0.7, rudderLift: 0.32, maxYaw: 1.1,
     dragLong: 0.05, dragLat: 1.4, planing: 0.8, roll: 1.1, bounce: 1.0,
     buoyancyPoints: [[0, -0.37, 2.8], [-0.9, -0.37, 1.0], [0.9, -0.37, 1.0], [-1.0, -0.37, -1.2], [1.0, -0.37, -1.2], [0, -0.37, -2.8]],
     label: 'Speedboat',
   },
   sailboat: {
     length: 8.0, width: 2.6, mass: 2600, draft: 0.6,
-    thrust: 14000, maxSpeed: 12, steerTorque: 0.55, rudderLift: 1.0,
+    thrust: 14000, maxSpeed: 12, steerTorque: 0.55, rudderLift: 0.6, maxYaw: 0.7,
     dragLong: 0.08, dragLat: 2.2, planing: 0.0, roll: 0.55, bounce: 0.7, sail: true,
     buoyancyPoints: [[0, -0.45, 3.6], [-1.1, -0.45, 1.2], [1.1, -0.45, 1.2], [-1.15, -0.45, -1.6], [1.15, -0.45, -1.6], [0, -0.45, -3.7]],
     label: 'Sailboat',
   },
   pontoon: {
     length: 7.0, width: 2.6, mass: 1900, draft: 0.35,
-    thrust: 14000, maxSpeed: 14, steerTorque: 0.6, rudderLift: 0.6,
+    thrust: 14000, maxSpeed: 14, steerTorque: 0.6, rudderLift: 0.35, maxYaw: 0.8,
     dragLong: 0.09, dragLat: 1.6, planing: 0.1, roll: 0.3, bounce: 0.6,
     buoyancyPoints: [[-1.0, -0.26, 3.2], [1.0, -0.26, 3.2], [-1.0, -0.26, 0], [1.0, -0.26, 0], [-1.0, -0.26, -3.2], [1.0, -0.26, -3.2]],
     label: 'Pontoon',
@@ -193,7 +193,11 @@ export class BoatPhysics {
       // Full thrust until three quarters of top speed, then a taper to the cap.
       const speedRatio = Math.abs(fwdSpeed) / (hull.maxSpeed * boost);
       thrustN *= THREE.MathUtils.clamp((1.0 - speedRatio) * 4, 0, 1);
-      const steerAngle = this.steer * 0.55;
+      // Screen convention: the hull faces +Z, so its visual starboard side is -X.
+      // Positive steer must swing the bow toward -X; flip the sign here once so
+      // every consumer can keep "positive = right".
+      const steerIn = -this.steer;
+      const steerAngle = steerIn * 0.55;
       // Outboard: thrust vector rotates with the steering, applied at the stern.
       _v.copy(this.forward).applyAxisAngle(this.up, -steerAngle);
       _v.y = 0; _v.normalize().multiplyScalar(thrustN * this.submersion);
@@ -202,7 +206,7 @@ export class BoatPhysics {
       torque.add(_w2.copy(_p).cross(_v).multiplyScalar(hull.steerTorque));
 
       // Rudder lift: a coasting boat still answers the helm, more so at speed.
-      const rudder = this.steer * hull.rudderLift * fwdSpeed * Math.abs(fwdSpeed) * m * 0.02 * this.submersion;
+      const rudder = steerIn * hull.rudderLift * fwdSpeed * Math.abs(fwdSpeed) * m * 0.02 * this.submersion;
       torque.y += rudder;
 
       // ------------------------------------------------------- hydrodynamics
@@ -210,15 +214,19 @@ export class BoatPhysics {
       const vLat = this.velocity.dot(this.right);
       const area = hull.length * hull.width;
       const fLong = -0.5 * WATER_RHO * hull.dragLong * area * 0.08 * vLong * Math.abs(vLong) * this.submersion;
-      const fLat = -0.5 * WATER_RHO * hull.dragLat * area * 0.08 * vLat * Math.abs(vLat) * this.submersion
-                 - m * 1.8 * vLat * this.submersion;
+      // Grip (linear) keeps the boat from sliding and acts at the centre of
+      // mass; only the quadratic hull drag acts down at the keel, which is what
+      // banks a planing hull into the turn. Putting both at the keel rolled the
+      // boat onto its side at full lock.
+      const fGrip = -m * 1.8 * vLat * this.submersion;
+      const fLat = -0.5 * WATER_RHO * hull.dragLat * area * 0.08 * vLat * Math.abs(vLat) * this.submersion;
       _v.copy(this.forward).multiplyScalar(fLong);
+      force.add(_v);
+      _v.copy(this.right).multiplyScalar(fGrip);
       force.add(_v);
       _v.copy(this.right).multiplyScalar(fLat);
       force.add(_v);
-      // Lateral resistance acts on the keel, below the centre of mass: the hull
-      // leans into the turn like a real planing boat.
-      _p.copy(this.up).multiplyScalar(-hull.draft * 1.2 * hull.roll);
+      _p.copy(this.up).multiplyScalar(-hull.draft * 1.0 * hull.roll);
       torque.add(_w2.copy(_p).cross(_v));
       // Reverse gets a low ceiling.
       if (vLong < -4) force.addScaledVector(this.forward, -(vLong + 4) * m * 2);
@@ -231,9 +239,13 @@ export class BoatPhysics {
       torque.addScaledVector(this.up, -wy * this.inertia.y * 2.2 * this.submersion);
       torque.addScaledVector(this.forward, -wz * this.inertia.z * 4.5 * this.submersion);
 
-      // Upright assist: kids should never be stuck upside down.
-      const tilt = _v.copy(this.up).cross(_up); // axis to rotate toward upright
-      torque.addScaledVector(tilt, m * G * hull.width * 0.25);
+      // Upright spring: a strong metacentric restoring moment (kids should never
+      // be stuck on their side), stiffening hard past a 20 degree bank so a turn
+      // reads as a lean, not a capsize.
+      const tilt = _v.copy(this.up).cross(_up); // axis to rotate toward upright, |tilt| = sin(bank)
+      const bank = Math.asin(Math.min(1, tilt.length()));
+      const stiff = 1 + 6 * THREE.MathUtils.smoothstep(bank, 0.3, 0.6);
+      torque.addScaledVector(tilt, m * G * hull.width * 0.9 * stiff);
     } else {
       // In the air: light drag and a little damping so flips stay controlled.
       force.addScaledVector(this.velocity, -0.8);
@@ -250,9 +262,12 @@ export class BoatPhysics {
     const ty = torque.dot(this.up) / this.inertia.y;
     const tz = torque.dot(this.forward) / this.inertia.z;
     this.angular.addScaledVector(this.right, tx * dt).addScaledVector(this.up, ty * dt).addScaledVector(this.forward, tz * dt);
-    // Clamp spin so a wave cannot flip the boat into a barrel roll.
+    // Clamp spin so a wave cannot flip the boat into a barrel roll, and cap the
+    // yaw rate per hull so a light jet ski turns tight but never spins like a top.
     const maxSpin = 2.6;
     if (this.angular.lengthSq() > maxSpin * maxSpin) this.angular.setLength(maxSpin);
+    const wyaw = this.angular.dot(this.up), maxYaw = hull.maxYaw || 1.2;
+    if (Math.abs(wyaw) > maxYaw) this.angular.addScaledVector(this.up, Math.sign(wyaw) * maxYaw - wyaw);
 
     this.position.addScaledVector(this.velocity, dt);
     const angle = this.angular.length() * dt;
@@ -269,6 +284,27 @@ export class BoatPhysics {
     }
     this._syncAxes();
     this.wakeStrength = THREE.MathUtils.clamp(Math.abs(fwdSpeed) / hull.maxSpeed, 0, 1) * this.submersion;
+
+    // Beached: hull entirely out of the water with land under it. Count the
+    // seconds so the game can rescue the boat back to open water.
+    if (this.groundFn && this.airborne && this.groundFn(this.position.x, this.position.z) > surf - hull.draft) this.beachedTime = (this.beachedTime || 0) + dt;
+    else this.beachedTime = 0;
+  }
+
+  /** Find open water near the boat and put it back there, facing away from land. */
+  rescue() {
+    if (!this.groundFn) { this.reset(); return; }
+    const g = this.groundFn, x0 = this.position.x, z0 = this.position.z;
+    let best = null;
+    for (let r = 6; r <= 120 && !best; r += 6) {
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 12) {
+        const x = x0 + Math.cos(a) * r, z = z0 + Math.sin(a) * r;
+        if (g(x, z) < -3.5 && g(x + 4, z) < -3 && g(x - 4, z) < -3 && g(x, z + 4) < -3 && g(x, z - 4) < -3) { best = { x, z, a }; break; }
+      }
+    }
+    if (!best) { this.reset(); return; }
+    const h = this.sea.heightAt(best.x, best.z);
+    this.setPose(best.x, h + 0.2, best.z, Math.atan2(Math.cos(best.a), Math.sin(best.a)));
   }
 
   _collideGround(force, dt) {
@@ -287,15 +323,21 @@ export class BoatPhysics {
       const e = 1.0;
       const nx = g(_p.x - e, _p.z) - g(_p.x + e, _p.z);
       const nz = g(_p.x, _p.z - e) - g(_p.x, _p.z + e);
-      _v.set(nx, 2 * e, nz).normalize();
+      // Treat land as a wall, not a ramp: keep the push mostly horizontal so a
+      // boat at full throttle bumps and slides along the beach instead of
+      // launching up it and beaching on the grass.
+      _v.set(nx, 0, nz);
+      if (_v.lengthSq() < 1e-6) _v.copy(this.forward).multiplyScalar(-1).setY(0);
+      _v.normalize();
       const vn = this.velocity.dot(_v);
       const scale = Math.min(pen, 1.5);
-      // Hard bump: a stiff spring plus a strong damper against inward motion.
-      _v.multiplyScalar(hull.mass * (G * 4 * scale + Math.max(0, -vn) * 8));
+      _v.multiplyScalar(hull.mass * (G * 4 * scale + Math.max(0, -vn) * 10));
       force.add(_v);
       this.contacts.push(pen);
-      // friction / scrape slows the boat down a lot
-      force.addScaledVector(this.velocity, -hull.mass * 2.5 * Math.min(1, scale));
+      // Scrape: strong friction on the horizontal velocity.
+      force.x -= this.velocity.x * hull.mass * 3.0 * Math.min(1, scale);
+      force.z -= this.velocity.z * hull.mass * 3.0 * Math.min(1, scale);
+      this.beachedTimer = (this.beachedTimer || 0);
     }
   }
 }

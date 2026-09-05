@@ -247,12 +247,15 @@ export class SkyRenderer {
         uSeaFill: { value: 0 },
         uSeaFillTint: { value: new THREE.Vector3(0.16, 0.30, 0.38) },
       },
-      depthTest: false,
+      // Drawn after the opaque scene at the far plane with a depth test, so the
+      // sky only shades pixels nothing else covered instead of being overdrawn
+      // by the whole sea every frame.
+      depthTest: true,
       depthWrite: false,
     });
     this.mesh = new THREE.Mesh(bgGeom, this.bgMaterial);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = -1000;
+    this.mesh.renderOrder = 1000;
 
     // ---- environment probe (equirect, mipmapped, used for ocean reflections)
     this.envRT = makeRT(256, 128, {

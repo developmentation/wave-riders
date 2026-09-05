@@ -42,6 +42,11 @@ function buildProjectedGrid(nx, ny) {
   return g;
 }
 
+// Anisotropy for the baked foam and ripple tiles in game mode, once their mip
+// chains exist (see OceanMesh._fixTileSamplers). The FFT cascades keep the 16x
+// the simulation asks for.
+const LITE_TILE_ANISO = 4;
+
 const VERT = /* glsl */ `
 precision highp float;
 precision highp int;
@@ -429,7 +434,15 @@ layout(location = 0) out vec4 oColor;
 layout(location = 1) out vec4 oVelocity;
 
 vec4 sampleCascadeGrad(sampler2D tex, vec2 p, float scale, vec2 ddx, vec2 ddy) {
+#ifdef GAME_LITE
+  // The explicit gradients here are exactly what the hardware derives for the
+  // same coordinate, so in uniform control flow texture() is the same lookup
+  // through the fast sampler path: on Intel an explicit-gradient sample runs
+  // at a fraction of the rate. Measured 0.35 ms across the ten taps.
+  return texture(tex, p / scale);
+#else
   return textureGrad(tex, p / scale, ddx / scale, ddy / scale);
+#endif
 }
 
 /**
@@ -448,9 +461,16 @@ float cloudShadow(vec3 p, vec3 L) {
 
   vec2 w = xz + uCloudWind * uCloudTime * 0.6;
   vec4 m = textureLod(uWeatherMap, w / uWeatherScaleM, 0.0);
+#ifdef GAME_LITE
+  // The detail octave is a sixteen-percent modulation of a field that is
+  // smoothstepped straight afterwards; from a boat it is the same shadow with
+  // a slightly softer edge. Stand in its mean and save the tap.
+  float field = m.r * 0.62 + m.g * 0.22 + 0.08;
+#else
   vec4 n = textureLod(uWeatherMap, w / (uWeatherScaleM * 0.27)
                  + vec2(0.37, 0.11) - uCloudWind * uCloudTime * 0.00002, 0.0);
   float field = m.r * 0.62 + m.g * 0.22 + n.g * 0.16;
+#endif
   float cov = clamp((field - 0.5) * uCloudContrast + uCoverage, 0.0, 1.0);
 
   // Thin edges of a cell shadow far less than its core, and a slanted beam
@@ -504,7 +524,14 @@ void main(){
   // the layer can live all the way to where it genuinely stops resolving
   // instead of being cut early to hide its own aliasing.
   float microFade = 1.0 - smoothstep(0.35, 2.2, fpShade);
+#ifdef GAME_LITE
+  // Unconditional: from a boat nearly every water pixel is inside the fade,
+  // so the branch saved nothing, and outside a branch the taps can use
+  // implicit gradients (see sampleCascadeGrad). The fade still applies.
+  {
+#else
   if (microFade > 0.004) {
+#endif
     vec2 wdir = normalize(uWindDir + 1e-5);
     vec2 drift = wdir * uTime;
     // Three taps of the one tile at incommensurate scales, each turned to its
@@ -515,6 +542,15 @@ void main(){
     mat2 rotA = mat2( 0.8339, 0.5519, -0.5519, 0.8339);
     mat2 rotB = mat2(-0.2225, 0.9749, -0.9749, -0.2225);
     vec2 qA = rotA * q, qB = rotB * q;
+#ifdef GAME_LITE
+    // Two layers. The finest tile repeats every seven metres and its wavelets
+    // are centimetres across: from the deck of a boat at 720p, upscaled and
+    // temporally filtered, that layer is sub-pixel a few metres out and what it
+    // contributes is already charged to the roughness lobe via microFade.
+    vec3 r0 = texture(uRippleTex, q * 0.0131 + drift * 0.0075).xyz * 2.0 - 1.0;
+    vec3 r1 = texture(uRippleTex, qA * 0.0474 - drift * 0.019).xyz * 2.0 - 1.0;
+    vec2 micro = r0.xz * 0.58 + (r1.xz * rotA) * 0.42;
+#else
     vec3 r0 = textureGrad(uRippleTex, q * 0.0131 + drift * 0.0075,
                           ddx * 0.0131, ddy * 0.0131).xyz * 2.0 - 1.0;
     vec3 r1 = textureGrad(uRippleTex, qA * 0.0474 - drift * 0.019,
@@ -524,6 +560,7 @@ void main(){
     // Each layer's slope lives in its own rotated frame; carry it back with the
     // transpose before adding, or the ripples all lean the same wrong way.
     vec2 micro = r0.xz * 0.46 + (r1.xz * rotA) * 0.33 + (r2.xz * rotB) * 0.21;
+#endif
     micro *= microFade * (0.05 + 0.011 * uWindSpeed);
     N = normalize(N + vec3(micro.x, 0.0, micro.y));
   }
@@ -576,7 +613,12 @@ void main(){
   // ------------------------------------------------------------------- foam
   vec4 t0 = sampleCascadeGrad(uOceanTurb0, q, uOceanScales.x, ddx, ddy);
   vec4 t1 = sampleCascadeGrad(uOceanTurb1, q, uOceanScales.y, ddx, ddy);
+#ifdef GAME_LITE
+  // No underwater world in game mode, so the fine slot always holds foam.
+  vec4 t2 = sampleCascadeGrad(uOceanTurb2,q,uOceanScales.z,ddx,ddy);
+#else
   vec4 t2 = uBottomVisible>.001?t1:sampleCascadeGrad(uOceanTurb2,q,uOceanScales.z,ddx,ddy);
+#endif
   // The cascades overlap in space, so take the strongest raft rather than the
   // sum — adding them triple-counts a crest that all three see.
   float rawFoam = max(max(t0.r * 0.75, t1.r), t2.r * 0.45);
@@ -594,12 +636,26 @@ void main(){
   vec2 stretch = vec2(0.22, 1.0);   // long downwind, narrow across
   float t = uTime;
   vec2 gx = windFrame * ddx, gy = windFrame * ddy;
-  vec4 fx0 = textureGrad(uFoamTex, qs * 0.031 * stretch + vec2(t * 0.004, -t * 0.003),
-                         gx * 0.031 * stretch, gy * 0.031 * stretch);
+#ifdef GAME_LITE
+  vec4 fx1 = texture(uFoamTex, qs * 0.145 * stretch - vec2(t * 0.011, t * 0.008));
+  vec4 fx2 = texture(uFoamTex, q * 0.62 + vec2(-t * 0.03, t * 0.021));
+#else
   vec4 fx1 = textureGrad(uFoamTex, qs * 0.145 * stretch - vec2(t * 0.011, t * 0.008),
                          gx * 0.145 * stretch, gy * 0.145 * stretch);
   vec4 fx2 = textureGrad(uFoamTex, q * 0.62 + vec2(-t * 0.03, t * 0.021), ddx * 0.62, ddy * 0.62);
+#endif
+#ifdef GAME_LITE
+  // The thirty-metre windrow octave only feeds the erosion noise. Its alpha
+  // averages one half, so its mean stands in for it: the rafts keep their
+  // medium and fine structure and lose only the slow drift in raft density
+  // along the wind, which from a boat is below the coverage variation the
+  // simulation itself produces.
+  float foamNoise = 0.25 + fx1.a * 0.42 + fx2.a * 0.22;
+#else
+  vec4 fx0 = textureGrad(uFoamTex, qs * 0.031 * stretch + vec2(t * 0.004, -t * 0.003),
+                         gx * 0.031 * stretch, gy * 0.031 * stretch);
   float foamNoise = fx0.a * 0.5 + fx1.a * 0.42 + fx2.a * 0.22;
+#endif
   float foamDetail = fx1.r * 0.55 + fx2.r * 0.45;
   float foamFine = fx2.g * 0.6 + fx1.g * 0.4;
 
@@ -674,9 +730,16 @@ void main(){
   // A tsunami face is not a backlit sheet, it is tens of metres of opaque
   // water, so the deeper the body behind the surface the less gets through.
   float thinness = 1.0 / (1.0 + max(vEventY, 0.0) * 0.075);
+#ifdef GAME_LITE
+  // Same lobes as integer products: four multiplies instead of two pow()s.
+  float bl4 = clamp(dot(L, -V), 0.0, 1.0); bl4 *= bl4; bl4 *= bl4;
+  float bl3 = 0.5 - 0.5 * dot(L, N); bl3 = bl3 * bl3 * bl3;
+  float backlit = heightNorm * thinness * bl4 * bl3;
+#else
   float backlit = heightNorm * thinness
                 * pow(clamp(dot(L, -V), 0.0, 1.0), 4.0)
                 * pow(0.5 - 0.5 * dot(L, N), 3.0);
+#endif
   vec3 scatter = bodyR * sun * backlit * 3.4 / (1.0 + max(0.0, -L.y) * 4.0);
 
   // Downwelling irradiance just under the surface: the direct beam landing on a
@@ -693,6 +756,11 @@ void main(){
   // Whatever little climbs back out of the deep water below.
   vec3 deep = uWaterAbsorb * skyAmb * 0.8;
   vec3 refracted = scatter + deep;
+#ifndef GAME_LITE
+  // The reef seen through clear shallows and the nutrient plume over the deep
+  // vent belong to the underwater world, which game mode never builds. The
+  // plume alone is a 3D value noise per pixel, evaluated everywhere for a tint
+  // that only exists within a few hundred metres of the vent.
   if(uBottomVisible>.001){
     vec2 refUV=gl_FragCoord.xy/uResolution+N.xz*0.009/(1.0+vDist*.012);
     refUV=clamp(refUV,vec2(.001),vec2(.999));
@@ -704,6 +772,7 @@ void main(){
   float bloom=uNutrientBloom*exp(-dot(plumeAt,plumeAt)/100000.0);
   float eddies=.45+.55*vnoise3(vec3(vWorldPos.xz*.025,uTime*.028));
   refracted+=vec3(.008,.044,.021)*bloom*eddies*(beam+skyAmb)*2.2;
+#endif
 
   // ------------------------------------------------------------- combine
   vec3 color = mix(refracted, env, F) + spec;
@@ -752,23 +821,44 @@ void main(){
 
   // Living light is emitted by the disturbed water and foam. Applying it
   // before the foam layer would cover it with unlit foam on a moonless night.
+#ifndef GAME_LITE
   float livingCrests=pow(clamp(foam*.8+max(vWaveY,0.0)*.17,0.0,1.0),1.65);
   float livingDetail=.35+pow(foamFine,.7)*1.5;
   color+=vec3(.034,.75,1.17)*bloom*eddies*uBioStrength*uDiveNight*(.018+livingCrests*livingDetail*2.2);
+#endif
   color += vec3(rainRip) * sun * 0.02;
   vec3 preLightning = color;
 
   // ----------------------------------------------------------- lightning
+#ifdef GAME_LITE
+  // Both strokes idle is the common case; one uniform test skips the lot.
+  if (uLightning0.w + uLightning1.w > 0.0001) {
+    color += lightningContribution(vWorldPos, N, V, uLightning0, uLightning1, uLightningColor)
+           * (0.55 + foam * 1.6);
+  }
+#else
   color += lightningContribution(vWorldPos, N, V, uLightning0, uLightning1, uLightningColor)
          * (0.55 + foam * 1.6);
+#endif
   color += uAmbientFlash * uLightningColor * (0.02 + foam * 0.35 + F * 0.25);
 
   // ------------------------------------------------------ aerial perspective
   vec2 screenUv = gl_FragCoord.xy / uResolution;
   vec4 ap = sampleAerial(screenUv, vDist);
+#ifdef GAME_LITE
+  // The per-channel exponents warm the far haze by a few percent. A blend
+  // towards the square is within two percent of them over the whole range
+  // and costs three multiplies instead of three pow()s.
+  float apT = clamp(ap.a, 0.0, 1.0);
+  vec3 tr = mix(vec3(apT), vec3(apT * apT), vec3(0.0, 0.06, 0.16));
+#else
   vec3 tr = pow(vec3(clamp(ap.a, 0.0, 1.0)), vec3(1.0, 1.06, 1.16));
+#endif
   color = color * tr + ap.rgb * uSunIntensity;
 
+#ifndef GAME_LITE
+  // Compiled out in game mode: a dead uniform branch still keeps every
+  // intermediate it names alive to the end of the shader.
   if (uDebugMode > 0.5) {
     vec3 dbg = vec3(0.0);
     int m = int(uDebugMode + 0.5);
@@ -794,6 +884,7 @@ void main(){
     oVelocity = vec4(0.0, 0.0, vDist, 1.0);
     return;
   }
+#endif
 
   oColor = vec4(max(color, vec3(0.0)), 1.0);
 
@@ -804,10 +895,16 @@ void main(){
 `;
 
 export class OceanMesh {
-  constructor(oceanFFT, atmosphere, quality, cloudShared = null) {
+  /**
+   * @param opts.lite Compile the surface with GAME_LITE: the fragment work a
+   *   player racing on the surface cannot see is left out (see the #ifdef
+   *   blocks in FRAG). Off by default, and off the explorer is unchanged.
+   */
+  constructor(oceanFFT, atmosphere, quality, cloudShared = null, opts = {}) {
     this.fft = oceanFFT;
     this.gridX = 0;
     this.gridY = 0;
+    this.lite = false;
 
     // NOTE: projectionMatrix / viewMatrix are three.js built-ins for raw
     // materials — declaring them here would overwrite the renderer's values.
@@ -881,7 +978,58 @@ export class OceanMesh {
     this.nearMesh=new THREE.Mesh(new THREE.BufferGeometry(),this.nearMaterial);
     this.nearMesh.frustumCulled=false;this.nearMesh.visible=false;
     this.mesh.add(this.nearMesh);
+    this._tilesFixed = false;
+    this.mesh.onBeforeRender = (renderer) => {
+      if (this.lite && !this._tilesFixed) this._fixTileSamplers(renderer);
+    };
+    if (opts.lite) this.setLite(true);
     this.setResolution(quality.oceanGridX, quality.oceanGridY);
+  }
+
+  /**
+   * Switch the GAME_LITE fragment path on or off. Both surface materials are
+   * recompiled on the next frame; nothing else about the mesh changes.
+   */
+  setLite(on) {
+    on = !!on;
+    if (this.lite === on) return;
+    this.lite = on;
+    for (const m of [this.material, this.nearMaterial]) {
+      if (on) m.defines.GAME_LITE = 1; else delete m.defines.GAME_LITE;
+      m.needsUpdate = true;
+    }
+  }
+
+  /**
+   * The foam and ripple tiles are baked into render targets and then asked, in
+   * JS, for mipmaps and anisotropy (ProceduralTextures.js). three.js applies
+   * sampler state to a render-target texture only when the target is set up
+   * and ignores needsUpdate on it afterwards, so in GL both tiles are still
+   * LINEAR, unmipmapped and isotropic: a 2048x2048 RGBA8 sheet read at full
+   * resolution by every water pixel, each tap tens of texels from its
+   * neighbour's. Those two taps alone were 2.6 ms of a 4.3 ms surface on an
+   * Intel iGPU, and they aliased as well. Game mode builds the chain and sets
+   * the filter here, through the renderer's state cache so its bookkeeping
+   * stays right. The proper fix belongs in bake(); once the tiles arrive with
+   * mipmaps this sees LINEAR_MIPMAP_LINEAR already set and does nothing.
+   */
+  _fixTileSamplers(renderer) {
+    const gl = renderer.getContext();
+    const ext = renderer.extensions.get('EXT_texture_filter_anisotropic');
+    const aniso = ext ? Math.min(LITE_TILE_ANISO, renderer.capabilities.getMaxAnisotropy()) : 1;
+    let done = true;
+    for (const tex of [U.uFoamTex.value, U.uRippleTex.value]) {
+      const glTex = tex && renderer.properties.get(tex).__webglTexture;
+      if (!glTex) { done = false; continue; }      // not uploaded yet; retry next frame
+      renderer.state.bindTexture(gl.TEXTURE_2D, glTex);
+      if (gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER) !== gl.LINEAR_MIPMAP_LINEAR) {
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        if (ext && aniso > 1) gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+      }
+      renderer.state.unbindTexture();
+    }
+    this._tilesFixed = done;
   }
 
   setResolution(gridX, gridY) {

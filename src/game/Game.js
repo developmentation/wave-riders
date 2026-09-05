@@ -69,7 +69,11 @@ export class Game {
     app.cine.shot = null;
     // Hold 60: the adaptive loop tolerates +25 %, so aim a little under 16.7.
     app.quality.targetMs = 15;
-    app.quality.minScale = 0.6;
+    // Resolution floor in absolute pixels, not a fraction of the window: a
+    // 1440p or high-DPI screen must be allowed to drop as far as a 720p one.
+    const floor = () => { app.quality.minScale = THREE.MathUtils.clamp(440 / (window.innerHeight * Math.min(window.devicePixelRatio || 1, app.quality.maxPixelRatio)), 0.3, 0.75); };
+    floor();
+    window.addEventListener('resize', floor);
     app.quality.canUpgrade = true;
     // First seconds are shader compiles, not steady state: do not shed tiers on them.
     app.quality._cooldown = 6.0;
@@ -436,6 +440,7 @@ export class Game {
       b.update(dt, this.wind);
       const r = Math.hypot(b.position.x, b.position.z);
       if (r > bounds) b.velocity.addScaledVector(new THREE.Vector3(-b.position.x / r, 0, -b.position.z / r), dt * 6 * Math.min(3, (r - bounds) / 40));
+      if ((b.beachedTime || 0) > 1.5) { b.rescue(); if (boat === this.player) this.hud?.toast?.('Back to the water!'); }
       if (b.slapImpulse > before + 0.2) {
         if (boat === this.player) { this.camera.impulse(b.slapImpulse * 0.6); }
         this.audio?.splash?.(b.slapImpulse);
