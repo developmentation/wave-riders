@@ -27,9 +27,11 @@ const FALLBACK_MODELS = {
   sailboat: { file: 'boat-sail-a.glb', length: 3.77, yaw: 0, lift: 0.0 },
 };
 
-async function optional(path) {
-  try { return await import(path); }
-  catch (e) { console.warn(`[game] module ${path} unavailable:`, e?.message || e); return null; }
+// Each import is a literal so the bundler emits a chunk for it; a variable
+// path would be left as a runtime import that 404s in production.
+async function optional(name, load) {
+  try { return await load(); }
+  catch (e) { console.warn(`[game] module ${name} unavailable:`, e?.message || e); return null; }
 }
 
 export class Game {
@@ -87,9 +89,12 @@ export class Game {
     if (matte && matte !== '0') this.setMatte(true);
 
     const [Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam, SubmarineWorld, Submarine, SubRace] = await Promise.all([
-      optional('./Boats.js'), optional('./Worlds.js'), optional('./Hud.js'), optional('./Audio.js'),
-      optional('./Race.js'), optional('./Portals.js'), optional('./Wake.js'), optional('./ShoreFoam.js'),
-      optional('./SubmarineWorld.js'), optional('./Submarine.js'), optional('./SubRace.js'),
+      optional('Boats', () => import('./Boats.js')), optional('Worlds', () => import('./Worlds.js')),
+      optional('Hud', () => import('./Hud.js')), optional('Audio', () => import('./Audio.js')),
+      optional('Race', () => import('./Race.js')), optional('Portals', () => import('./Portals.js')),
+      optional('Wake', () => import('./Wake.js')), optional('ShoreFoam', () => import('./ShoreFoam.js')),
+      optional('SubmarineWorld', () => import('./SubmarineWorld.js')), optional('Submarine', () => import('./Submarine.js')),
+      optional('SubRace', () => import('./SubRace.js')),
     ]);
     this.mods = { Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam, SubmarineWorld, Submarine, SubRace };
     if (ShoreFoam?.ShoreFoam) this.shoreFoam = new ShoreFoam.ShoreFoam(this);
