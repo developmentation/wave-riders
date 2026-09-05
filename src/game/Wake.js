@@ -502,8 +502,9 @@ class BoatWake {
         D[v * 4] = side; D[v * 4 + 1] = age; D[v * 4 + 2] = this.rstr[i]; D[v * 4 + 3] = core; v++;
       }
     }
-    if (this.count > 0) {
-      // live head at the transom so the wake is glued to the hull
+    if (this.count > 0 && b.submersion > 0) {
+      // live head at the transom so the wake is glued to the hull; while the
+      // hull is airborne the ribbon ends at the last row it laid in the water
       for (let side = -1; side <= 1; side++) {
         const x = _s.x + _r.x * this.w0 * side, z = _s.z + _r.z * this.w0 * side;
         P[v * 3] = x; P[v * 3 + 1] = sea.heightAt(x, z) + SURF_LIFT; P[v * 3 + 2] = z;
