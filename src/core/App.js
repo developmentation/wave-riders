@@ -95,7 +95,10 @@ export class App {
     this.clouds = new Clouds(renderer, this.atmosphere, this.textures, this.quality);
 
     this.onProgress('tessellating ocean', 0.7);
-    this.oceanMesh = new OceanMesh(this.ocean, this.atmosphere, this.quality, this.clouds.shared, { lite: this.surfaceOnly });
+    // Game mode draws the sea as a radial world-space grid (no horizon holes in
+    // big seas); ?radial=0 falls back to the projected grid for comparison.
+    this.oceanMesh = new OceanMesh(this.ocean, this.atmosphere, this.quality, this.clouds.shared,
+      { lite: this.surfaceOnly, radial: this.surfaceOnly && this.params.get('radial') !== '0' });
 
     this.lightning = new Lightning();
     this.waterspout = new Waterspout();
@@ -152,7 +155,8 @@ export class App {
    */
   setQualityPreset(name, scale = 1.0) {
     this.quality.setPreset(name, scale);
-    this.oceanMesh?.setResolution(this.quality.oceanGridX, this.quality.oceanGridY);
+    this.oceanMesh?.setResolution(this.quality.oceanGridX, this.quality.oceanGridY,
+      this.quality.oceanRings, this.quality.oceanAngles);
     this.clouds?.setQuality(this.quality);
     this.rain?.setQuality(this.quality);
     this.spray?.setQuality(this.quality);
@@ -241,10 +245,11 @@ export class App {
     const camY = this.camera.position.y - U.uSeaLevel.value;
     const localMean = (this.director?.eventHeight(this.camera.position.x, this.camera.position.z)||0)
       +(this.underwater?.dynamics.surfaceHeight(this.camera.position.x,this.camera.position.z)||0);
-    // Game mode: big seas put crests above the flat plane's horizon, where the
-    // projected grid cannot reach and a strip of sky fill shows. Lifting the
-    // reference plane with wave height extends the grid's reach to cover them.
-    const planeLift = this.surfaceOnly ? (this.ocean.significantWaveHeight || 0) * 0.45 : 0;
+    // Game mode on the projected grid (?radial=0): big seas put crests above
+    // the flat plane's horizon, where the grid cannot reach and a strip of sky
+    // fill shows. Lifting the reference plane with wave height extends its
+    // reach a little. The radial grid has no reference plane and ignores this.
+    const planeLift = this.surfaceOnly && !this.oceanMesh.radial ? (this.ocean.significantWaveHeight || 0) * 0.45 : 0;
     this.oceanMesh.material.uniforms.uGridPlane.value = Math.min(localMean + planeLift, camY - 0.5);
 
     // ---- TAA jitter

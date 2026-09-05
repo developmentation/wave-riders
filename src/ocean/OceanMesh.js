@@ -42,6 +42,72 @@ function buildProjectedGrid(nx, ny) {
   return g;
 }
 
+/**
+ * World-space radial grid for game mode, centred on the lens by the vertex
+ * shader. The projected grid cannot draw a crest that rises above the
+ * geometric horizon of its reference plane — such rays miss the plane and are
+ * snapped to the horizon ring with their displacement faded — so in a big sea
+ * a band of sky fill opens between the near crests and the horizon. Here
+ * every vertex is a fixed polar offset from the camera, displaced in world
+ * space like any other mesh: the disc is a closed surface all the way round
+ * (behind the lens too, for a chase camera that yaws fast) and out past the
+ * true horizon, so no view direction can find a gap in it.
+ *
+ * Ring radii follow r(u) = a (e^{ku} - 1), u = ring / rings: linear at the
+ * lens (a k / rings = nearSpacing, ring 0 at r = 0 so there is no hole under
+ * the camera) and geometric further out, where a few percent per ring is the
+ * spacing the long swell needs. Each vertex carries its cell size so the
+ * displacement lookup can pick a mip that the mesh can actually resolve.
+ */
+function buildRadialGrid(rings, angles, rMax, nearSpacing) {
+  const s = nearSpacing * rings;              // = a k
+  let k = 8.0;
+  for (let it = 0; it < 60; it++) k = Math.log(1.0 + rMax * k / s);
+  const a = s / k;
+  const radius = (j) => a * (Math.exp(k * j / rings) - 1.0);
+  const dTheta = 2.0 * Math.PI / angles;
+
+  const vertCount = (rings + 1) * angles;
+  const polar = new Float32Array(vertCount * 4);
+  let o = 0;
+  for (let j = 0; j <= rings; j++) {
+    const r = radius(j);
+    const j0 = Math.max(j - 1, 0), j1 = Math.min(j + 1, rings);
+    const dr = (radius(j1) - radius(j0)) / (j1 - j0);
+    const cell = Math.max(dr, r * dTheta);
+    for (let i = 0; i < angles; i++) {
+      const th = i * dTheta;
+      polar[o++] = Math.cos(th);
+      polar[o++] = Math.sin(th);
+      polar[o++] = r;
+      polar[o++] = cell;
+    }
+  }
+  const idx = new Uint32Array(rings * angles * 6);
+  let n = 0;
+  for (let j = 0; j < rings; j++) {
+    for (let i = 0; i < angles; i++) {
+      const p = j * angles + i;
+      const q = j * angles + (i + 1) % angles;   // shared vertex closes the ring
+      const pp = p + angles, qq = q + angles;
+      idx[n++] = p; idx[n++] = pp; idx[n++] = qq;
+      idx[n++] = p; idx[n++] = qq; idx[n++] = q;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('aPolar', new THREE.BufferAttribute(polar, 4));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
+  return g;
+}
+
+// Ring spacing at the lens for the radial grid, metres. Past a few metres the
+// spacing is set by the ring count alone (r * k / rings), so this only decides
+// how finely the water right under the camera is tessellated.
+const RADIAL_NEAR_SPACING = 0.3;
+const RADIAL_DEFAULT_RINGS = 176;
+const RADIAL_DEFAULT_ANGLES = 192;
+
 // Anisotropy for the baked foam and ripple tiles in game mode, once their mip
 // chains exist (see OceanMesh._fixTileSamplers). The FFT cascades keep the 16x
 // the simulation asks for.
@@ -52,7 +118,11 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 
+#ifdef RADIAL_GRID
+in vec4 aPolar;   // (cos a, sin a, ring radius, local cell size) — see buildRadialGrid
+#else
 in vec2 aGrid;
+#endif
 
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
@@ -233,6 +303,30 @@ void placeSurface(vec2 world,vec3 lods,float horizonFade){
 }
 
 void main(){
+#ifdef RADIAL_GRID
+  // Game mode: a world-space disc of rings around the lens (buildRadialGrid).
+  // The vertex is a fixed polar offset from the camera's xz, so the mesh
+  // slides through the wave field as the boat moves and every vertex samples
+  // whatever water happens to be there. No ray, no reference plane, no horizon
+  // snap and no fade: a crest that stands above the geometric horizon is
+  // simply drawn there, with the rings behind it filling in down to the true
+  // horizon, which the outer rings (out to uRMax) reach past for any lens
+  // below a few hundred metres. The centre is continuous rather than snapped:
+  // a radial pattern is not translation-invariant, so snapping would only
+  // trade a slow flow for pops every cell, and the mip chosen from the cell
+  // size below keeps the field smooth at the scale the vertices move over.
+  //
+  // Angles are fixed in world space, so yawing the camera moves no vertex.
+  // The previous-frame clip position in placeSurface uses this same world
+  // point with last frame's matrices, i.e. the velocity is that of a static
+  // surface under a moving camera, exactly as the projected grid reports it.
+  vec2 world = uCamPos.xz + aPolar.xy * aPolar.z;
+  // Never sample finer than the mesh can resolve: the cell is the ring
+  // spacing or the arc between neighbouring angles, whichever is larger.
+  vec3 texel = uOceanScales / uOceanTexels;
+  vec3 lods = log2(max(vec3(aPolar.w) / texel, vec3(1.0)));
+  placeSurface(world, lods, 1.0);
+#else
   // A regular local grid continues behind and below a lens in a wave trough.
   // The distant projected grid alone cannot cover that view: its near rows
   // can be displaced through the camera, exposing the ends of triangles.
@@ -379,6 +473,7 @@ void main(){
   vec3 texel = uOceanScales / uOceanTexels;
   vec3 lods = log2(max(vec3(cell) / texel, vec3(1.0)));
   placeSurface(world,lods,1.0-snapped*.92);
+#endif
 }
 `;
 
@@ -499,12 +594,16 @@ float cloudShadow(vec3 p, vec3 L) {
 }
 
 void main(){
+#ifndef RADIAL_GRID
+  // The radial grid is one closed mesh, so it has no seam to hide and no
+  // near patch to clip against; the test is compiled out there.
   if(uNearPatchEnabled>.5){
     float radius=length(vFlatPos-uPatchOrigin);
     // The two meshes overlap by 4 m so their slightly different sampling never
     // opens a hairline gap along the seam (it showed as a dark line in big seas).
     if((uNearPatch>.5&&radius>80.0)||(uNearPatch<.5&&radius<=76.0))discard;
   }
+#endif
   vec2 q = swirlCoords(vFlatPos, uTime);
   q = warpCoord(q, uTime, uCurrentStrength);
 
@@ -891,7 +990,13 @@ void main(){
     color = grey * (sun * nl / PI_S + skyAmb * 1.1);
     color *= 0.92 + 0.08 * smoothstep(0.45, 0.55, fract(vWorldPos.y * 0.5));
     #if MATTE == 2
+    #ifdef RADIAL_GRID
+    // diagnostics: band the rings by the mip their displacement was read at,
+    // so the tessellation and its LOD steps can be checked by eye
+    color *= mix(vec3(1.0, 0.82, 0.82), vec3(0.82, 1.0, 0.82), fract(vLods.y));
+    #else
     if (uNearPatch > 0.5) color *= vec3(1.0, 0.8, 0.8);   // diagnostics: tint the near patch
+    #endif
     #endif
   }
 #endif
@@ -952,12 +1057,20 @@ export class OceanMesh {
    * @param opts.lite Compile the surface with GAME_LITE: the fragment work a
    *   player racing on the surface cannot see is left out (see the #ifdef
    *   blocks in FRAG). Off by default, and off the explorer is unchanged.
+   * @param opts.radial Draw the sea as a world-space radial grid around the
+   *   lens instead of the screen-space projected grid (see buildRadialGrid).
+   *   Defaults to opts.lite; the explorer keeps the projected grid.
    */
   constructor(oceanFFT, atmosphere, quality, cloudShared = null, opts = {}) {
     this.fft = oceanFFT;
     this.gridX = 0;
     this.gridY = 0;
+    this.rings = 0;
+    this.angles = 0;
     this.lite = false;
+    this.radial = false;
+    this._gridGeom = null;
+    this._radialGeom = null;
 
     // NOTE: projectionMatrix / viewMatrix are three.js built-ins for raw
     // materials — declaring them here would overwrite the renderer's values.
@@ -1036,7 +1149,42 @@ export class OceanMesh {
       if (this.lite && !this._tilesFixed) this._fixTileSamplers(renderer);
     };
     if (opts.lite) this.setLite(true);
-    this.setResolution(quality.oceanGridX, quality.oceanGridY);
+    if (opts.radial ?? opts.lite) this.setRadial(true);
+    this.setResolution(quality.oceanGridX, quality.oceanGridY, quality.oceanRings, quality.oceanAngles);
+  }
+
+  /**
+   * Switch between the projected grid and the radial grid. Both surface
+   * materials are recompiled with or without RADIAL_GRID, the active geometry
+   * is swapped, and the near patch — a fix for the projected grid's uncovered
+   * near rows, which a closed disc does not have — is taken out of the scene
+   * graph rather than merely hidden, so nothing compiles or draws it.
+   */
+  setRadial(on) {
+    on = !!on;
+    if (this.radial === on) return;
+    this.radial = on;
+    for (const m of [this.material, this.nearMaterial]) {
+      if (on) m.defines.RADIAL_GRID = 1; else delete m.defines.RADIAL_GRID;
+      m.needsUpdate = true;
+    }
+    if (on) this.mesh.remove(this.nearMesh); else this.mesh.add(this.nearMesh);
+    this.nearMesh.visible = false;
+    this.uniforms.uNearPatchEnabled.value = 0;
+    this._applyGeometry();
+  }
+
+  _applyGeometry() {
+    if (this.radial) {
+      if (!this._radialGeom && this.rings) {
+        this._radialGeom = buildRadialGrid(this.rings, this.angles, this.uniforms.uRMax.value, RADIAL_NEAR_SPACING);
+      }
+      if (this._radialGeom) this.mesh.geometry = this._radialGeom;
+      this.triangles = this.rings * this.angles * 2;
+    } else {
+      if (this._gridGeom) this.mesh.geometry = this._gridGeom;
+      this.triangles = this.gridX * this.gridY * 2;
+    }
   }
 
   /**
@@ -1096,19 +1244,31 @@ export class OceanMesh {
     this._tilesFixed = done;
   }
 
-  setResolution(gridX, gridY) {
+  /**
+   * @param gridX,gridY  cells of the screen-space projected grid.
+   * @param rings,angles rings and angular divisions of the radial grid (game
+   *   presets carry these as oceanRings / oceanAngles); the projected grid
+   *   ignores them and vice versa, so a preset can size each independently.
+   */
+  setResolution(gridX, gridY, rings = RADIAL_DEFAULT_RINGS, angles = RADIAL_DEFAULT_ANGLES) {
     gridX = Math.max(16, gridX | 0); gridY = Math.max(12, gridY | 0);
-    if (this.gridX === gridX && this.gridY === gridY) return;
-    this.gridX = gridX; this.gridY = gridY;
-    const old = this.mesh.geometry;
-    this.mesh.geometry = buildProjectedGrid(gridX, gridY);
-    if (old) old.dispose();
-    this.uniforms.uGridSize.value.set(gridX, gridY);
-    const patchCells=Math.max(96,Math.min(320,Math.round(gridX*.75)));
-    this.nearMesh.geometry.dispose();
-    this.nearMesh.geometry=buildProjectedGrid(patchCells,patchCells);
-    this.uniforms.uPatchCell.value=192/patchCells;
-    this.triangles = gridX * gridY * 2;
+    rings = Math.max(24, rings | 0); angles = Math.max(24, angles | 0);
+    if (this.gridX !== gridX || this.gridY !== gridY) {
+      this.gridX = gridX; this.gridY = gridY;
+      this._gridGeom?.dispose();
+      this._gridGeom = buildProjectedGrid(gridX, gridY);
+      this.uniforms.uGridSize.value.set(gridX, gridY);
+      const patchCells=Math.max(96,Math.min(320,Math.round(gridX*.75)));
+      this.nearMesh.geometry.dispose();
+      this.nearMesh.geometry=buildProjectedGrid(patchCells,patchCells);
+      this.uniforms.uPatchCell.value=192/patchCells;
+    }
+    if (this.rings !== rings || this.angles !== angles) {
+      this.rings = rings; this.angles = angles;
+      this._radialGeom?.dispose();
+      this._radialGeom = null;      // built on demand by _applyGeometry
+    }
+    this._applyGeometry();
   }
 
   /**
@@ -1125,13 +1285,18 @@ export class OceanMesh {
     // about the surface (see VERT). That needs the reference plane on the
     // surface, not App's "half a metre under the lens".
     if (this.lite && under) this.uniforms.uGridPlane.value = surfaceY - U.uSeaLevel.value;
+    // The radial grid is a closed world-space surface: from under it the lens
+    // simply sees its underside as the ceiling, no mirrored projection and no
+    // near patch needed.
+    if (this.radial) return;
     this.nearMesh.visible=Math.abs(camPos.y-surfaceY)<35;
     this.uniforms.uNearPatchEnabled.value=this.nearMesh.visible?1:0;
     this.uniforms.uPatchOrigin.value.set(camPos.x,camPos.z);
   }
 
   dispose() {
-    this.mesh.geometry.dispose();
+    this._gridGeom?.dispose();
+    this._radialGeom?.dispose();
     this.material.dispose();
     this.nearMesh.geometry.dispose();this.nearMaterial.dispose();
   }

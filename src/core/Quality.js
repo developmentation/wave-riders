@@ -37,16 +37,18 @@ export const PRESETS = {
   // Boat game profile: the sea and sky at full quality, the expensive extras
   // (volumetric cloud steps, DoF, motion blur, particle counts) trimmed hard so
   // an integrated GPU holds 60 fps. Adaptive scaling still applies below it.
+  // oceanRings / oceanAngles size the game's radial sea mesh (OceanMesh
+  // buildRadialGrid); oceanGridX/Y only matter on the ?radial=0 fallback.
   game: {
     label: 'GAME', renderScale: 0.9, maxPixelRatio: 1.0,
-    oceanGridX: 160, oceanGridY: 100, fftSize: 128,
+    oceanGridX: 160, oceanGridY: 100, oceanRings: 176, oceanAngles: 192, fftSize: 128,
     cloudScale: 0.3, cloudRowScale: 0.52, cloudSteps: 20, cloudLightSteps: 3, cloudEnabled: true,
     sprayCount: 6000, rainCount: 14000, dof: false, motionBlur: false, taa: true,
     envSize: 128, envCloudSteps: 8, spoutSteps: 24,
   },
   gamelow: {
     label: 'GAME LOW', renderScale: 1.0, maxPixelRatio: 1.0,
-    oceanGridX: 128, oceanGridY: 84, fftSize: 128,
+    oceanGridX: 128, oceanGridY: 84, oceanRings: 136, oceanAngles: 160, fftSize: 128,
     cloudScale: 0.25, cloudRowScale: 0.52, cloudSteps: 16, cloudLightSteps: 2, cloudEnabled: true,
     sprayCount: 3000, rainCount: 9000, dof: false, motionBlur: false, taa: true,
     envSize: 128, envCloudSteps: 6, spoutSteps: 16,
