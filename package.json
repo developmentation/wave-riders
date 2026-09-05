@@ -1,8 +1,8 @@
 {
-  "name": "abyssal-living-deep",
-  "version": "3.5.0",
+  "name": "wave-riders",
+  "version": "0.1.0",
   "type": "module",
-  "description": "A seeded underwater world beneath ABYSSAL's procedural ocean: coral reefs, kelp forests, marine life, volumetric light and a bioluminescent deep, with live generation and weather dials.",
+  "description": "Wave Riders: a kids' boat-racing game (jet skis, speedboats, sailboats, pontoons) on the ABYSSAL procedural ocean, with portals into calm, swell and storm worlds.",
   "license": "MIT",
   "author": "Davi (Token-Gremlin) <https://github.com/Token-Gremlin>",
   "homepage": "https://github.com/emollick/abyssal-living-deep#readme",
@@ -16,15 +16,17 @@
   "keywords": [
     "threejs",
     "webgl2",
+    "boat-racing",
+    "kids-game",
+    "fft-ocean",
+    "procedural-generation",
     "glsl",
     "shaders",
     "ocean",
-    "fft-ocean",
     "water-simulation",
     "volumetric-clouds",
     "atmospheric-scattering",
     "raymarching",
-    "procedural-generation",
     "weather-simulation",
     "natural-disasters",
     "tsunami",
@@ -43,7 +45,9 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "test": "node tools/quality-sim.mjs && node tools/underwater-sim.mjs && node tools/connected-ocean-sim.mjs && node tools/fauna-sim.mjs && node tools/animal-motion-sim.mjs && node tools/biome-sim.mjs",
-    "smoke": "node tools/smoke.mjs"
+    "smoke": "node tools/smoke.mjs",
+    "game-smoke": "node tools/game-smoke.mjs --gpu",
+    "test:game": "node tools/check-worlds.mjs && node tools/game-smoke.mjs --gpu --seconds 10"
   },
   "dependencies": {
     "three": "^0.169.0"

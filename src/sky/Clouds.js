@@ -652,16 +652,26 @@ void main(){
   // hard rectangles until all slots have been revisited. Soft and
   // low-resolution converges to sharp; blocky reads as broken.
   vec4 smooth_ = texture(uQuarter, vUv);
-  vec4 smoothDiag = texture(uQuarterDiag, vUv);
 
+  // The depth channel, on the other hand, is never filtered. Its "no hit" value
+  // is a sentinel (-1) sitting next to real hits of kilometres, and a bilinear
+  // tap that straddles a cloud silhouette returns their weighted mean: a few
+  // metres, which the validity test below accepts as a hit. Reprojecting a sky
+  // ray through a point a few metres from the eye throws it most of a screen
+  // sideways the moment the camera translates, and whatever it fetches there
+  // (colour and depth alike) is written here to be fetched again next frame.
+  // Driving at speed that is self-sustaining: every column that entered the
+  // screen during a turn was seeded with blended depths and stayed a blurred
+  // white veil, hard-edged against the converged history beside it. Nearest
+  // reads keep every stored depth one the march actually produced.
   if (uReset > 0.5) {
     oColor = fresh ? cur : smooth_;
-    oDiag = fresh ? curDiag : smoothDiag;
+    oDiag = curDiag;
     return;
   }
 
   // reproject using this pixel's own history depth; fall back to the shell mid
-  float dist = texture(uHistoryDiag, vUv).x;
+  float dist = texelFetch(uHistoryDiag, lp, 0).x;
   if (!(dist > 0.0 && dist < 65000.0)) dist = uShellMid;
 
   vec2 ndc = vUv * 2.0 - 1.0;
@@ -674,12 +684,14 @@ void main(){
   // Disoccluded at the edge the camera is panning into — same story as a reset.
   if (any(lessThan(prevUv, vec2(0.0))) || any(greaterThan(prevUv, vec2(1.0)))) {
     oColor = fresh ? cur : smooth_;
-    oDiag = fresh ? curDiag : smoothDiag;
+    oDiag = curDiag;
     return;
   }
 
   vec4 hist = texture(uHistory, prevUv);
-  vec4 histDiag = texture(uHistoryDiag, prevUv);
+  ivec2 hsize = textureSize(uHistoryDiag, 0);
+  vec4 histDiag = texelFetch(uHistoryDiag,
+      clamp(ivec2(prevUv * vec2(hsize)), ivec2(0), hsize - 1), 0);
 
   // Reject stale history the same way TAA does: the 3x3 block of freshly
   // marched samples around this pixel bounds what it can plausibly be. Without

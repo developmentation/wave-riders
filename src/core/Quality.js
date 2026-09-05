@@ -34,9 +34,27 @@ export const PRESETS = {
     sprayCount: 150000, rainCount: 180000, dof: true, motionBlur: true, taa: true,
     envSize: 512, envCloudSteps: 26, spoutSteps: 96,
   },
+  // Boat game profile: the sea and sky at full quality, the expensive extras
+  // (volumetric cloud steps, DoF, motion blur, particle counts) trimmed hard so
+  // an integrated GPU holds 60 fps. Adaptive scaling still applies below it.
+  game: {
+    label: 'GAME', renderScale: 1.0, maxPixelRatio: 1.0,
+    oceanGridX: 160, oceanGridY: 100, fftSize: 128,
+    cloudScale: 0.3, cloudSteps: 24, cloudLightSteps: 3, cloudEnabled: true,
+    sprayCount: 6000, rainCount: 8000, dof: false, motionBlur: false, taa: true,
+    envSize: 128, envCloudSteps: 8, spoutSteps: 24,
+  },
+  gamelow: {
+    label: 'GAME LOW', renderScale: 0.85, maxPixelRatio: 1.0,
+    oceanGridX: 128, oceanGridY: 84, fftSize: 128,
+    cloudScale: 0.25, cloudSteps: 12, cloudLightSteps: 2, cloudEnabled: true,
+    sprayCount: 3000, rainCount: 5000, dof: false, motionBlur: false, taa: true,
+    envSize: 128, envCloudSteps: 6, spoutSteps: 16,
+  },
 };
 
 export const TIERS = ['ultra', 'high', 'medium', 'low', 'potato'];
+export const GAME_TIERS = ['game', 'gamelow'];
 
 // Enough frames that one slow one does not decide policy...
 const SAMPLE_FRAMES = 24;
@@ -65,6 +83,9 @@ export class Quality {
     this.history = new Float32Array(90);
     this.historyIndex = 0;
     this.onDowngrade = null;
+    // Lowest dynamic resolution scale the loop may choose. The game raises it:
+    // a quarter-resolution sea reads as mud, so it sheds cloud/particle tiers first.
+    this.minScale = MIN_SCALE;
   }
 
   setPreset(name, scale = 1.0) {
@@ -78,10 +99,11 @@ export class Quality {
 
   /** Name of the preset n tiers cheaper, clamped to the bottom. Null if there. */
   tierBelow(n) {
-    const i = TIERS.indexOf(this.presetName);
+    const tiers = GAME_TIERS.includes(this.presetName) ? GAME_TIERS : TIERS;
+    const i = tiers.indexOf(this.presetName);
     if (i < 0) return null;
-    const j = Math.min(i + n, TIERS.length - 1);
-    return j > i ? TIERS[j] : null;
+    const j = Math.min(i + n, tiers.length - 1);
+    return j > i ? tiers[j] : null;
   }
 
   /** Middle frame time of the closed window; unlike the mean, outlier-proof. */
@@ -108,14 +130,14 @@ export class Quality {
       // Hand the floor scale down with it, so the rebuild allocates the small
       // targets directly rather than building full-size ones and discarding
       // them on the very next line.
-      this.onDowngrade(tier, MIN_SCALE);
+      this.onDowngrade(tier, this.minScale);
       this._cooldown = 3.0;
       return true;
     }
 
     // Already on the bottom tier; resolution is the only knob left.
     const prev = this.dynamicScale;
-    this.dynamicScale = MIN_SCALE;
+    this.dynamicScale = this.minScale;
     this._cooldown = 2.0;
     return Math.abs(prev - this.dynamicScale) > 1e-4;
   }
@@ -157,12 +179,12 @@ export class Quality {
     const prev = this.dynamicScale;
     if (avg > this.targetMs * 1.25) {
       const tier = this.tierBelow(1);
-      if (this.dynamicScale <= MIN_SCALE + 0.06 && tier && this.onDowngrade) {
+      if (this.dynamicScale <= this.minScale + 0.06 && tier && this.onDowngrade) {
         this.onDowngrade(tier, 1.0);
         this._cooldown = 4.0;
         return true;
       }
-      this.dynamicScale = Math.max(MIN_SCALE, this.dynamicScale - 0.09);
+      this.dynamicScale = Math.max(this.minScale, this.dynamicScale - 0.09);
       this._cooldown = 0.9;
     } else if (avg < this.targetMs * 0.68) {
       this.dynamicScale = Math.min(1.0, this.dynamicScale + 0.045);

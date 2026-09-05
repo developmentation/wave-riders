@@ -106,6 +106,11 @@ uniform sampler2D uCloudTex;
 uniform float uCloudEnabled;
 uniform float uTimeStars;
 uniform float uFogDensity;
+// Surface-only mode (the boat game): with no submerged view to composite,
+// rays that slip between wave rows would show the atmosphere's black ground.
+// Stand in a mirrored, water-tinted sky instead, as the env probe does.
+uniform float uSeaFill;
+uniform vec3 uSeaFillTint;
 
 ${ATMO_COMMON}
 ${SHADING_GLSL}
@@ -135,6 +140,13 @@ void main(){
   }
 
   sky += uAmbientFlash * uLightningColor * 0.012 * max(0.0, 1.0 - abs(dir.y));
+
+  if (uSeaFill > 0.5 && dir.y < 0.0) {
+    float below = smoothstep(0.0, -0.03, dir.y);
+    vec3 lookDir = normalize(vec3(dir.x, abs(dir.y) * 0.35 + 0.02, dir.z));
+    vec3 mirrored = renderSky(lookDir, uCamPos) * uSunIntensity;
+    sky = mix(sky, mirrored * uSeaFillTint, below);
+  }
 
   oColor = vec4(sky, 1.0);
 
@@ -232,6 +244,8 @@ export class SkyRenderer {
         uResolution: U.uResolution,
         uFogDensity: U.uFogDensity,
         uCloudTex: { value: null },
+        uSeaFill: { value: 0 },
+        uSeaFillTint: { value: new THREE.Vector3(0.16, 0.30, 0.38) },
       },
       depthTest: false,
       depthWrite: false,

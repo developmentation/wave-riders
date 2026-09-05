@@ -1,4 +1,63 @@
-# ABYSSAL — The Living Deep
+# WAVE RIDERS — boat racing for kids on a living ocean
+
+Pick a jet ski, speedboat, sailboat or pontoon at a sunny harbour, drive through a glowing portal
+and race around islands on a **real simulated ocean**: calm turquoise lagoon, rolling trade-wind
+swell, or a thunderstorm with rain and lightning. Built for 5–8 year olds on tablets and laptops
+(touch wheel + pedals, keyboard, gamepad), with boat handling that comes from actual buoyancy on
+the FFT wave surface rather than a scripted bob.
+
+Wave Riders is built on top of [ABYSSAL — The Living Deep](https://github.com/emollick/abyssal-living-deep)
+(itself a fork of Token-Gremlin's ABYSSAL). The original ocean explorer is still here at
+`explore.html`; the game is the front door (`index.html`).
+
+## Play
+
+```sh
+npm ci
+npm run dev        # http://localhost:5173/  (game)   http://localhost:5173/explore.html (ocean explorer)
+npm run build      # static site in dist/
+```
+
+| Control | Keyboard | Touch | Gamepad |
+| --- | --- | --- | --- |
+| Throttle / brake | W / S or ↑ / ↓ | green / red pedals | RT / LT |
+| Steer | A / D or ← / → | wheel or ◀ ▶ buttons (optional tilt) | left stick |
+| Boost / horn | Space / H | ⚡ / 📣 | B / A |
+| Camera / reset boat / pause | C / R / Esc | 📷 / 🔄 / ⏸ | X / Y / Start |
+
+URL switches for testing: `?boat=jetski|speedboat|sailboat|pontoon`, `?skip=title` (straight to the
+harbour), `?skip=lagoon|swell|storm` (straight into a race), `?debug=1` (physics/perf overlay),
+`?profile=1` (GPU pass timings), `?preset=game|gamelow`, `?touch=1` (force touch controls),
+`?mods=Name,Name` (load `src/game/<Name>.js` dev hooks).
+
+## How it is built
+
+- **`src/game/`** — the game: `WaveField.js` reads the GPU wave surface back to the CPU every frame
+  (async pixel-buffer readback of a 64×64 height/slope grid around the player) so `BoatPhysics.js`
+  can float every hull on N buoyancy points with real slap, roll, planing and outboard-style
+  steering; `PropMaterial.js` lights boats/islands/gates inside the engine's HDR multi-target
+  pipeline (sun through the atmospheric transmittance LUT, sky irradiance probe, aerial perspective,
+  motion vectors for TAA); `Worlds.js` / `Islands.js` build procedural islands and courses;
+  `Portals.js`, `Race.js`, `Wake.js`, `Hud.js`, `Audio.js` (all sound is WebAudio synthesis) and
+  `Game.js` tie it together. See `docs/GAME-DESIGN.md` for the brief, quality bar and module contract.
+- **Engine changes** are small and additive: a surface-only mode in `src/core/App.js` (the game
+  never builds the underwater world), `game`/`gamelow` quality presets with a configurable
+  resolution floor in `src/core/Quality.js`, and a water-coloured sky fill below the horizon in
+  `src/sky/SkyRenderer.js` for gaps between wave rows.
+- **Testing**: `node tools/game-smoke.mjs --gpu` boots the game in Chrome, drives the boat, samples
+  frame time and writes screenshots to `tools/shots/`; `--touch` emulates a tablet.
+
+## Art and licenses
+
+- Boats (speedboats, sailboats), buoys, gates and ramps: **Kenney — Watercraft Kit**, CC0 1.0
+  (public domain), in `public/models/kenney-watercraft/` with its license file. https://kenney.nl/assets/watercraft-kit
+- Jet ski, pontoon, driver figures, islands, portals, gates, HUD art: generated in code (no downloaded assets).
+- No audio files: engines, water, chimes and music are synthesized at runtime.
+- Engine: ABYSSAL / natural-disasters by Davi (Token-Gremlin) and the Living Deep extension, MIT (see below).
+
+---
+
+# Engine: ABYSSAL — The Living Deep
 
 A procedural expansion of [ABYSSAL by Token-Gremlin](https://github.com/Token-Gremlin/natural-disasters). Begin at sea level, floating with the waves. Dive into a sunlit reef, a kelp forest, the continental slope and a 1,400-metre trench, all grown together from one seed. Swim through the waterline into the sky, or follow the canyon into the dark.
 

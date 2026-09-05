@@ -19,8 +19,13 @@ import { UnderwaterWorld } from '../underwater/UnderwaterWorld.js';
 import { WaterInterface } from '../underwater/WaterInterface.js';
 
 export class App {
-  constructor(canvas, onProgress = () => {}) {
+  constructor(canvas, onProgress = () => {}, opts = {}) {
     this.canvas = canvas;
+    // Game mode: no underwater world is built or rendered. The sea surface,
+    // sky, weather and post stack are unchanged; the camera stays above the
+    // waves so the submerged view is never needed.
+    this.surfaceOnly = !!opts.surfaceOnly;
+    this.presetOverride = opts.preset || null;
     this.onProgress = onProgress;
     this.time = 0;
     this.frame = 0;
@@ -65,7 +70,7 @@ export class App {
     this.params = params;
     this.profiler = new GpuProfiler(renderer);
     this.profiler.enabled = params.get('profile') === '1';
-    this.quality = new Quality(params.get('preset') || autoDetectPreset(this.caps.renderer));
+    this.quality = new Quality(params.get('preset') || this.presetOverride || autoDetectPreset(this.caps.renderer));
     if (params.get('adaptive') === '0') this.quality.adaptive = false;
     this.quality.onDowngrade = (name, scale) => this.setQualityPreset(name, scale);
 
@@ -119,8 +124,10 @@ export class App {
     this._resize(true);
     window.addEventListener('resize', () => this._resize());
 
-    this.onProgress('growing the underwater world', 0.90);
-    this.underwater = new UnderwaterWorld(this);
+    if (!this.surfaceOnly) {
+      this.onProgress('growing the underwater world', 0.90);
+      this.underwater = new UnderwaterWorld(this);
+    } else this.underwater = null;
     this.waterInterface = new WaterInterface(this);
 
     this.onProgress('warming shaders', 0.94);
@@ -129,7 +136,7 @@ export class App {
     this.sky.renderEnv();
     // Surface shaders compile on the first surface visit. Compiling the full
     // storm pipeline before a reef dive makes the first encounter needlessly slow.
-    renderer.compile(this.params.get('surface') === '1' ? this.scene : this.underwater.scene, this.camera);
+    renderer.compile(this.surfaceOnly || this.params.get('surface') === '1' ? this.scene : this.underwater.scene, this.camera);
 
     this.onProgress('ready', 1.0);
   }
@@ -252,12 +259,13 @@ export class App {
     this.submerged=lensDepth>0;
     const boundary=Math.max(3,(this.ocean.significantWaveHeight||0)*1.5);
     const nearSurface=Math.abs(lensDepth)<boundary;
-    const needAir=lensDepth<0||nearSurface;
-    const bottomStrength=(1-THREE.MathUtils.smoothstep(-this.underwater.floor(this.camera.position.x,this.camera.position.z),85,160))
+    const needAir=lensDepth<0||nearSurface||!this.underwater;
+    const uw=this.underwater;
+    const bottomStrength=uw?(1-THREE.MathUtils.smoothstep(-uw.floor(this.camera.position.x,this.camera.position.z),85,160))
       *(1-THREE.MathUtils.smoothstep(this.camera.position.y,100,200))
-      *(1-THREE.MathUtils.smoothstep(this.underwater.dynamics.mixing,.5,.95));
-    const needWater=lensDepth>0||nearSurface||bottomStrength>.001;
-    this.underwater.update(this.time,this.camera);
+      *(1-THREE.MathUtils.smoothstep(uw.dynamics.mixing,.5,.95)):0;
+    const needWater=!!uw&&(lensDepth>0||nearSurface||bottomStrength>.001);
+    uw?.update(this.time,this.camera);
     this.afterUpdate?.(scaled, dt);
 
     prof.begin('particles');
@@ -297,7 +305,7 @@ export class App {
 
     this.post.settings.focusDistance = this.cine.focusDistance;
     prof.begin('post');
-    const result=nearSurface?this.waterInterface.render(this.hdrRT,water):needAir?this.hdrRT:water;
+    const result=(nearSurface&&water)?this.waterInterface.render(this.hdrRT,water):(needAir||!water)?this.hdrRT:water;
     this.post.render(result.textures[0],result.textures[1],null);
     prof.end('post');
     prof.collect();
