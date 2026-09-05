@@ -501,7 +501,9 @@ float cloudShadow(vec3 p, vec3 L) {
 void main(){
   if(uNearPatchEnabled>.5){
     float radius=length(vFlatPos-uPatchOrigin);
-    if((uNearPatch>.5&&radius>80.0)||(uNearPatch<.5&&radius<=80.0))discard;
+    // The two meshes overlap by 4 m so their slightly different sampling never
+    // opens a hairline gap along the seam (it showed as a dark line in big seas).
+    if((uNearPatch>.5&&radius>80.0)||(uNearPatch<.5&&radius<=76.0))discard;
   }
   vec2 q = swirlCoords(vFlatPos, uTime);
   q = warpCoord(q, uTime, uCurrentStrength);

@@ -18,6 +18,7 @@ import { PropMaterial, convertToProps, trackMotion } from './PropMaterial.js';
  * while a module is missing or broken.
  */
 const MODEL_BASE = './models/kenney-watercraft/';
+const _ca = new THREE.Vector3(), _cb = new THREE.Vector3(), _cn = new THREE.Vector3(), _cv = new THREE.Vector3();
 const STARS_KEY = 'waveriders.stars.v1';
 
 // Fallback visuals if Boats.js is unavailable.
@@ -299,6 +300,7 @@ export class Game {
         if (!wantSub) this.wake?.attach?.(this.player);
       }
       this.camera.mode = wantSub ? 'sub' : 'boat';
+      if (wantSub) setTimeout(() => this.hud?.toast?.(this.hud?.touch ? '▼ dive  ▲ rise' : 'Q dive · E rise'), 1200);
       const y = wantSub ? (s.y ?? this.sea.meanHeight(s.x, s.z)) : this.sea.meanHeight(s.x, s.z) + 0.3;
       this.player.body.setPose(s.x, y, s.z, s.heading || 0);
       this.camera.orbit = null;
@@ -503,6 +505,7 @@ export class Game {
       boat.visual?.update?.(dt, b, this.wind);
     }
 
+    this._collideBoats(dt);
     this.race?.update?.(dt);
     this.mods.Worlds?.updateWorldEvents?.(this.app, this.world?.def, dt);
     this.world?.update?.(dt, this.app.camera);
@@ -557,6 +560,56 @@ export class Game {
         `pos ${b.position.x.toFixed(1)} ${b.position.y.toFixed(2)} ${b.position.z.toFixed(1)}  sub ${b.submersion.toFixed(2)}${b.airborne ? ' AIR' : ''}\n` +
         `sea ${this.sea.heightAt(b.position.x, b.position.z).toFixed(2)}  Hs ${(this.app.ocean.significantWaveHeight || 0).toFixed(2)}  readbacks ${this.sea.stats.readbacks} fb ${this.sea.stats.fallbacks}\n` +
         `${this.app.quality.presetName} ${(this.app.quality.averageMs || 0).toFixed(1)} ms  ${this.app.renderWidth}x${this.app.renderHeight}  ${c.lastDevice}`;
+    }
+  }
+
+  /**
+   * Boat-vs-boat contact: each hull is two spheres along its length (radius =
+   * half the beam). Overlapping pairs are pushed apart mass-weighted, exchange
+   * a little normal velocity and get a yaw kick, so boats bump and slide off
+   * each other instead of passing through. O(n²) over ≤ 5 boats, no allocations.
+   */
+  _collideBoats(dt) {
+    const boats = this.boats, n = boats.length;
+    if (n < 2) return;
+    for (let i = 0; i < n; i++) {
+      const A = boats[i].body, ha = A.hull;
+      const ra = Math.max(0.6, (ha.width || 2) * 0.5), la = (ha.length || 6) * 0.25;
+      for (let j = i + 1; j < n; j++) {
+        const B = boats[j].body, hb = B.hull;
+        const rb = Math.max(0.6, (hb.width || 2) * 0.5), lb = (hb.length || 6) * 0.25;
+        // Broad phase: centre distance vs summed half-lengths.
+        if (A.position.distanceToSquared(B.position) > (la * 2 + lb * 2 + ra + rb) ** 2) continue;
+        for (let sa = -1; sa <= 1; sa += 2) {
+          _ca.copy(A.position).addScaledVector(A.forward, sa * la);
+          for (let sb = -1; sb <= 1; sb += 2) {
+            _cb.copy(B.position).addScaledVector(B.forward, sb * lb);
+            _cn.subVectors(_cb, _ca);
+            const d = _cn.length(), minD = ra + rb;
+            if (d >= minD || d < 1e-4) continue;
+            _cn.divideScalar(d);
+            const pen = minD - d;
+            const ma = ha.mass || 1000, mb = hb.mass || 1000, wa = mb / (ma + mb), wb = ma / (ma + mb);
+            A.position.addScaledVector(_cn, -pen * wa * 0.5);
+            B.position.addScaledVector(_cn, pen * wb * 0.5);
+            _cv.subVectors(B.velocity, A.velocity);
+            const vn = _cv.dot(_cn);
+            if (vn < 0) {
+              // Closing: exchange normal velocity with mild restitution.
+              const jn = -(1 + 0.35) * vn / (1 / ma + 1 / mb);
+              A.velocity.addScaledVector(_cn, -jn / ma);
+              B.velocity.addScaledVector(_cn, jn / mb);
+              const bump = Math.min(1, -vn / 6);
+              A.angular.y += sa * bump * 0.35 * (_cn.dot(A.right) > 0 ? 1 : -1);
+              B.angular.y += sb * bump * 0.35 * (_cn.dot(B.right) > 0 ? -1 : 1);
+              if (bump > 0.15 && (boats[i] === this.player || boats[j] === this.player)) {
+                this.camera.impulse(bump * 0.5);
+                this.audio?.splash?.(bump);
+              }
+            }
+          }
+        }
+      }
     }
   }
 

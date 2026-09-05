@@ -312,12 +312,20 @@
 .wr-wheel svg { will-change: transform; transition: none; }
 .wr-wheel.is-down { cursor: grabbing; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 14px rgba(255, 216, 77, 0.6)); }
 .wr-arrows { display: flex; gap: clamp(10px, 2vmin, 24px); }
-/* Submarine dive buttons: stacked ▲▼, only in submarine mode. */
-.wr-dive { display: none; flex-direction: column; gap: clamp(8px, 1.5vmin, 18px); }
-#hud.wr-sub .wr-dive { display: flex; }
-.wr-dive .wr-dive-up svg { transform: rotate(90deg); }
-.wr-dive .wr-dive-down svg { transform: rotate(-90deg); }
-.wr-dive .wr-arrowbtn { background: linear-gradient(180deg, #7fe8ff, #1fb6e6 55%, #0a7fbf); box-shadow: 0 0.22em 0 #04486e, 0 0.5em 1.2em rgba(0, 0, 0, 0.35), inset 0 0.08em 0 rgba(255, 255, 255, 0.6); }
+/* Submarine: the steering arrows become a d-pad cross — ◀ ▶ steer, ▲ rise, ▼ dive. */
+.wr-divebtn { display: none; }
+#hud.wr-sub .wr-arrows { display: grid; grid-template-columns: repeat(3, auto); grid-template-rows: repeat(3, auto); gap: clamp(6px, 1.2vmin, 14px); align-items: center; justify-items: center; }
+#hud.wr-sub .wr-divebtn { display: inline-flex; }
+#hud.wr-sub .wr-dive-up { grid-area: 1 / 2; }
+#hud.wr-sub .wr-arrow-l { grid-area: 2 / 1; }
+#hud.wr-sub .wr-arrow-r { grid-area: 2 / 3; }
+#hud.wr-sub .wr-dive-down { grid-area: 3 / 2; }
+.wr-dive-up svg { transform: rotate(90deg); }
+.wr-dive-down svg { transform: rotate(-90deg); }
+.wr-divebtn { background: linear-gradient(180deg, #7fe8ff, #1fb6e6 55%, #0a7fbf); box-shadow: 0 0.22em 0 #04486e, 0 0.5em 1.2em rgba(0, 0, 0, 0.35), inset 0 0.08em 0 rgba(255, 255, 255, 0.6); }
+.wr-subkeys { display: none; }
+#hud.wr-sub .wr-subkeys { display: inline; }
+#hud.wr-sub .wr-keys { opacity: 1; animation: none; }
 /* Depth gauge beside the speedometer. */
 .wr-depth { position: absolute; display: none; left: calc(50% + clamp(90px, 15vmin, 150px)); bottom: calc(var(--sab) + var(--pad) * 0.6 + clamp(40px, 7vmin, 80px)); font-size: clamp(18px, 3.2vmin, 34px); }
 #hud.wr-sub[data-screen="race"] .wr-depth, #hud.wr-sub[data-screen="hub"] .wr-depth { display: inline-flex; }

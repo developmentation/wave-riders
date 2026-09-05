@@ -291,12 +291,10 @@ export class Hud {
       <div class="wr-left">
         <div class="wr-wheel" data-ctl="wheel" role="slider" aria-label="Steering wheel">${ICON.wheel}</div>
         <div class="wr-arrows">
+          <button class="wr-arrowbtn wr-dive-up wr-divebtn" data-ctl="up" aria-label="Rise">${ICON.left}</button>
           <button class="wr-arrowbtn wr-arrow-l" data-ctl="left" aria-label="Steer left">${ICON.left}</button>
           <button class="wr-arrowbtn wr-arrow-r" data-ctl="right" aria-label="Steer right">${ICON.right}</button>
-        </div>
-        <div class="wr-dive">
-          <button class="wr-arrowbtn wr-dive-up" data-ctl="up" aria-label="Rise">${ICON.left}</button>
-          <button class="wr-arrowbtn wr-dive-down" data-ctl="down" aria-label="Dive">${ICON.left}</button>
+          <button class="wr-arrowbtn wr-dive-down wr-divebtn" data-ctl="down" aria-label="Dive">${ICON.left}</button>
         </div>
       </div>
       <div class="wr-right">
@@ -307,7 +305,7 @@ export class Hud {
       </div>`);
     const hints = el('div', 'wr-keys', `
       <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to drive</span>
-      <span><kbd>Space</kbd> boost</span><span><kbd>C</kbd> camera</span><span><kbd>R</kbd> reset</span><span><kbd>Esc</kbd> pause</span>`);
+      <span><kbd>Space</kbd> boost</span><span class="wr-subkeys"><kbd>Q</kbd> dive <kbd>E</kbd> rise</span><span><kbd>C</kbd> camera</span><span><kbd>R</kbd> reset</span><span><kbd>Esc</kbd> pause</span>`);
     const toasts = el('div', 'wr-toasts');
     const rotate = el('div', 'wr-rotate', `<div class="wr-rotate-icon">📱</div><div class="wr-txt">Turn your tablet sideways!</div>`);
 
