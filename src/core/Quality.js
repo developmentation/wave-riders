@@ -40,14 +40,14 @@ export const PRESETS = {
   game: {
     label: 'GAME', renderScale: 0.9, maxPixelRatio: 1.0,
     oceanGridX: 160, oceanGridY: 100, fftSize: 128,
-    cloudScale: 0.3, cloudSteps: 24, cloudLightSteps: 3, cloudEnabled: true,
+    cloudScale: 0.3, cloudRowScale: 0.52, cloudSteps: 20, cloudLightSteps: 3, cloudEnabled: true,
     sprayCount: 6000, rainCount: 14000, dof: false, motionBlur: false, taa: true,
     envSize: 128, envCloudSteps: 8, spoutSteps: 24,
   },
   gamelow: {
     label: 'GAME LOW', renderScale: 1.0, maxPixelRatio: 1.0,
     oceanGridX: 128, oceanGridY: 84, fftSize: 128,
-    cloudScale: 0.25, cloudSteps: 20, cloudLightSteps: 2, cloudEnabled: true,
+    cloudScale: 0.25, cloudRowScale: 0.52, cloudSteps: 16, cloudLightSteps: 2, cloudEnabled: true,
     sprayCount: 3000, rainCount: 9000, dof: false, motionBlur: false, taa: true,
     envSize: 128, envCloudSteps: 6, spoutSteps: 16,
   },

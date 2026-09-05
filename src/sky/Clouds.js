@@ -24,6 +24,22 @@ const PROBE_NDC = [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]];
 const _pa = new THREE.Vector3();
 const _pb = new THREE.Vector3();
 
+// Row-map knots relative to the horizon, in screen v (0 = bottom), and the
+// relative row density of the four segments they cut the screen into: sea,
+// the band where the far deck lives, the near deck, open sky. Rows below the
+// horizon only exist to give the filters something to read at the sea line.
+const ROW_KNOTS = [-0.05, 0.10, 0.30];
+const ROW_WEIGHTS = [0.06, 2.0, 1.25, 1.0];
+
+/** Piecewise-linear map with knots A -> B, mirrors pwlMap in ROW_MAP_GLSL. */
+function pwl(x, A, B) {
+  const seg = (a0, a1, b0, b1) => b0 + (x - a0) * (b1 - b0) / Math.max(a1 - a0, 1e-6);
+  if (x < A.x) return seg(0, A.x, 0, B.x);
+  if (x < A.y) return seg(A.x, A.y, B.x, B.y);
+  if (x < A.z) return seg(A.y, A.z, B.y, B.z);
+  return seg(A.z, 1, B.z, 1);
+}
+
 const CLOUD_COMMON = /* glsl */ `
 uniform sampler3D uCloudShape;
 uniform sampler3D uCloudDetail;
@@ -284,6 +300,57 @@ vec3 lightningGlow(vec3 p) {
 }
 `;
 
+/**
+ * Row map between screen space and the low-resolution cloud buffer.
+ *
+ * Seen from a boat the cloud deck compresses into a thin band just above the
+ * horizon: everything beyond thirty kilometres lives in the bottom few degrees
+ * of sky, while more than half of a uniform buffer's rows point at the sea and
+ * march nothing. A piecewise-linear warp on the row coordinate moves those rows
+ * up into the band, so a far cumulus gets two to three times the vertical
+ * resolution for the same texel count. The march, the reprojection and the
+ * upsample all go through the same two functions; the knots come from the
+ * camera each frame (see Clouds._updateRowMap).
+ */
+const ROW_MAP_GLSL = /* glsl */ `
+uniform vec4 uRowV;   // screen-v knots of the row map (interior, ascending)
+uniform vec4 uRowS;   // matching knots in low-buffer row space
+
+float segMap(float x, float a0, float a1, float b0, float b1) {
+  return b0 + (x - a0) * (b1 - b0) / max(a1 - a0, 1e-6);
+}
+float pwlMap(float x, vec4 A, vec4 B) {
+  if (x < A.x) return segMap(x, 0.0, A.x, 0.0, B.x);
+  if (x < A.y) return segMap(x, A.x, A.y, B.x, B.y);
+  if (x < A.z) return segMap(x, A.y, A.z, B.y, B.z);
+  return segMap(x, A.z, 1.0, B.z, 1.0);
+}
+float rowToScreen(float s) { return pwlMap(s, uRowS, uRowV); }
+float screenToRow(float v) { return pwlMap(v, uRowV, uRowS); }
+
+// Catmull-Rom over the nine nearest texels of one mip level, gathered as four
+// bilinear taps. Straight bilinear magnification turns a half-resolution
+// cumulus into a lattice of diamonds; the cubic keeps an edge an edge.
+vec4 bicubicLod(sampler2D tex, vec2 uv, vec2 res, float lod) {
+  vec2 inv = 1.0 / res;
+  vec2 pos = uv * res - 0.5;
+  vec2 base = floor(pos);
+  vec2 f = pos - base;
+  vec2 f2 = f * f, f3 = f2 * f;
+  vec2 w0 = f2 - 0.5 * (f3 + f);
+  vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+  vec2 w3 = 0.5 * (f3 - f2);
+  vec2 w2 = 1.0 - w0 - w1 - w3;
+  vec2 s0 = w0 + w1, s1 = w2 + w3;
+  vec2 t0 = (base - 0.5 + w1 / s0) * inv;
+  vec2 t1 = (base + 1.5 + w3 / s1) * inv;
+  return textureLod(tex, vec2(t0.x, t0.y), lod) * (s0.x * s0.y)
+       + textureLod(tex, vec2(t1.x, t0.y), lod) * (s1.x * s0.y)
+       + textureLod(tex, vec2(t0.x, t1.y), lod) * (s0.x * s1.y)
+       + textureLod(tex, vec2(t1.x, t1.y), lod) * (s1.x * s1.y);
+}
+`;
+
 const CLOUD_MARCH = /* glsl */ `
 uniform int uSteps;
 uniform int uLightSteps;
@@ -430,18 +497,26 @@ vec4 marchClouds(vec3 ro, vec3 rd, float rayJitter, vec3 sunColor, out vec4 diag
   float t = t0 + nearFine * rayJitter;
   bool inside = false;
   int emptyRun = 0;
-  int spent = 0;
+  // Budget spent, in lit samples. An empty fine step — the rewind before a
+  // boundary, the run-out after one — is a single density fetch with no light
+  // march behind it, well under half the cost of a lit sample, and is charged
+  // as such. Charging it a whole step meant a horizon ray crossing two cells could
+  // burn most of a 24-step budget on empty air and then stretch what was left
+  // eightfold: the far deck was drawn from a handful of samples kilometres
+  // apart, which is what made it mushy long before the upsample blurred it.
+  float spent = 0.0;
+  float steps = float(uSteps);
 
   for (int i = 0; i < 512; i++) {
     gIters = float(i);
-    if (spent >= uSteps || t > t1 || transmittance < 0.004) break;
+    if (spent >= steps || t > t1 || transmittance < 0.004) break;
     // Sample spacing is a quality decision and must not be stretched to make
     // the ray reach the far shell: a 500 m step swallows the whole optical
     // depth of a storm cell in one go, which flattens its skin to a single
     // sample and turns the ray-start jitter into salt-and-pepper noise.
     // Instead the step only grows once the budget is nearly gone, smoothly,
     // so a ray that runs long fades out rather than cutting off.
-    float budget = float(uSteps - spent) / float(uSteps);
+    float budget = (steps - spent) / steps;
     float fine = nearFine * clamp(1.0 + t / 9000.0, 1.0, 22.0)
                * (1.0 + 7.0 * (1.0 - smoothstep(0.0, 0.35, budget)));
     // The stride is what hunts for the cloud boundary, so it cannot be longer
@@ -479,15 +554,17 @@ vec4 marchClouds(vec3 ro, vec3 rd, float rayJitter, vec3 sunColor, out vec4 diag
                        - smoothstep(uDetailFade.y, uDetailFade.z, t);
     float dens = cloudDensity(p, h, detail);
     peakDensity = max(peakDensity, dens);
-    spent++;
     if (dens > 0.0005) {
+      spent += 1.0;
       diag.w += 1.0;
       emptyRun = 0;
       if (depthOut < 0.0) depthOut = t;
 
       // Once the cloud in front has eaten most of the light, nothing behind it
-      // is resolvable, so the light march can drop to a couple of taps.
-      int ls = transmittance > 0.25 ? uLightSteps : 2;
+      // is resolvable, so the light march can drop to a couple of taps. The
+      // same goes past the second detail fade, where a cell is a few texels
+      // and mostly haze: two taps still give it a lit and a shaded side.
+      int ls = (transmittance > 0.25 && t < uDetailFade.y) ? uLightSteps : 2;
       vec3 lum = sampleLight(p, mu, sunColor, dens, rayJitter, ls);
       // Ambient: sky from above, ocean-tinted bounce from below, attenuated by
       // how deep inside the deck we are — that vertical gradient is what gives
@@ -502,8 +579,15 @@ vec4 marchClouds(vec3 ro, vec3 rd, float rayJitter, vec3 sunColor, out vec4 diag
       {
         float span = max(uCloudTop - uCloudBottom, 200.0);
         vec3 up = normalize(p);
-        above += cloudDensity(p + up * span * 0.10, min(h + 0.10, 1.0), 0.0) * span * 0.22;
-        above += cloudDensity(p + up * span * 0.34, min(h + 0.34, 1.0), 0.0) * span * 0.46;
+        if (t < uDetailFade.x) {
+          above += cloudDensity(p + up * span * 0.10, min(h + 0.10, 1.0), 0.0) * span * 0.22;
+          above += cloudDensity(p + up * span * 0.34, min(h + 0.34, 1.0), 0.0) * span * 0.46;
+        } else {
+          // Past the first detail fade a cell is a few texels tall on screen;
+          // one tap still separates its base from its shoulder, and the second
+          // was a third of the cost of every far sample.
+          above += cloudDensity(p + up * span * 0.20, min(h + 0.20, 1.0), 0.0) * span * 0.68;
+        }
       }
       float skyVis = exp(-above * SIGMA * 0.55);
 
@@ -516,8 +600,15 @@ vec4 marchClouds(vec3 ro, vec3 rd, float rayJitter, vec3 sunColor, out vec4 diag
       // analytic slab integration keeps banding away at low step counts
       scatter += lum * transmittance * (1.0 - tr);
       transmittance *= tr;
-    } else if (++emptyRun > 4) {
-      inside = false;
+    } else {
+      spent += 0.4;
+      // Five, not fewer: the stride hunts with the base shape, the fine steps
+      // with the eroded one, and the band just inside the base envelope is
+      // empty to the fine steps. Rewind (one stride) plus five empties carries
+      // the ray two fine steps past where the stride hit; exit any sooner and
+      // it lands back on that hit, rewinds again, and stalls there until the
+      // budget is gone — a cloud that is found sixteen ways and never drawn.
+      if (++emptyRun > 4) inside = false;
     }
     t += fine;
   }
@@ -527,7 +618,7 @@ vec4 marchClouds(vec3 ro, vec3 rd, float rayJitter, vec3 sunColor, out vec4 diag
   diag.x = clamp(depthOut, -1.0, 64000.0);
   diag.y = gShapeR;
   diag.z = max(gBase, peakDensity);
-  gSpent = float(spent);
+  gSpent = spent;
   return vec4(scatter, transmittance);
 }
 `;
@@ -558,6 +649,7 @@ ${SHADING_GLSL}
 ${NOISE_GLSL}
 ${CLOUD_COMMON}
 ${CLOUD_MARCH}
+${ROW_MAP_GLSL}
 
 uniform sampler2D uTransmittanceLUT;
 uniform sampler2D uSkyViewLUT;
@@ -569,6 +661,7 @@ layout(location = 1) out vec4 oDepth;
 void main(){
   vec2 lowPix = floor(gl_FragCoord.xy) * float(uInterleave) + uSlotOffset + 0.5;
   vec2 uv = lowPix / uLowRes;
+  uv.y = rowToScreen(uv.y);
 
   vec2 ndc = uv * 2.0 - 1.0;
   vec4 p0 = uInvViewProj * vec4(ndc, -1.0, 1.0); p0 /= p0.w;
@@ -633,9 +726,13 @@ uniform int uInterleave;
 uniform float uReset;
 uniform float uBlend;
 uniform float uShellMid;
+uniform vec4 uPrevRowV;      // last frame's row map, for the history lookup
+uniform vec4 uPrevRowS;
 in vec2 vUv;
 layout(location = 0) out vec4 oColor;
 layout(location = 1) out vec4 oDiag;
+
+${ROW_MAP_GLSL}
 
 void main(){
   ivec2 lp = ivec2(gl_FragCoord.xy);
@@ -674,7 +771,7 @@ void main(){
   float dist = texelFetch(uHistoryDiag, lp, 0).x;
   if (!(dist > 0.0 && dist < 65000.0)) dist = uShellMid;
 
-  vec2 ndc = vUv * 2.0 - 1.0;
+  vec2 ndc = vec2(vUv.x, rowToScreen(vUv.y)) * 2.0 - 1.0;
   vec4 p0 = uInvViewProj * vec4(ndc, -1.0, 1.0); p0 /= p0.w;
   vec4 p1 = uInvViewProj * vec4(ndc,  1.0, 1.0); p1 /= p1.w;
   vec3 rd = normalize(p1.xyz - p0.xyz);
@@ -688,10 +785,18 @@ void main(){
     return;
   }
 
-  vec4 hist = texture(uHistory, prevUv);
+  // The history was laid out with last frame's row map — the horizon moves
+  // with the camera's pitch — so the screen position is converted with that.
+  vec2 histUv = vec2(prevUv.x, pwlMap(prevUv.y, uPrevRowV, uPrevRowS));
   ivec2 hsize = textureSize(uHistoryDiag, 0);
+  // Cubic rather than bilinear: a texel that is dragged a fraction of a texel
+  // per frame and refreshed only once in sixteen is resampled fifteen times
+  // between marches, and fifteen bilinear taps in a row turn a cumulus into
+  // fog. Catmull-Rom loses almost nothing per resample, which is what keeps
+  // the deck sharp through a long turn of the chase camera.
+  vec4 hist = bicubicLod(uHistory, histUv, vec2(hsize), 0.0);
   vec4 histDiag = texelFetch(uHistoryDiag,
-      clamp(ivec2(prevUv * vec2(hsize)), ivec2(0), hsize - 1), 0);
+      clamp(ivec2(histUv * vec2(hsize)), ivec2(0), hsize - 1), 0);
 
   // Reject stale history the same way TAA does: the 3x3 block of freshly
   // marched samples around this pixel bounds what it can plausibly be. Without
@@ -729,46 +834,28 @@ void main(){
 const CLOUD_UPSAMPLE_FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D uSrc;
-uniform vec2 uInvSrc;
 uniform vec2 uSrcRes;
 uniform float uSharpen;   // 0 = trust the low buffer, 1 = hide the block grid
 uniform int uInterleave;
 in vec2 vUv;
 layout(location = 0) out vec4 oColor;
 
-// Catmull-Rom over the nine nearest texels, gathered as four bilinear taps.
-// Straight bilinear magnification turns a half-resolution cumulus into a
-// lattice of diamonds; the cubic keeps an edge an edge.
-vec4 bicubic(vec2 uv) {
-  vec2 pos = uv * uSrcRes - 0.5;
-  vec2 base = floor(pos);
-  vec2 f = pos - base;
-  vec2 f2 = f * f, f3 = f2 * f;
-  vec2 w0 = f2 - 0.5 * (f3 + f);
-  vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
-  vec2 w3 = 0.5 * (f3 - f2);
-  vec2 w2 = 1.0 - w0 - w1 - w3;
-  vec2 s0 = w0 + w1, s1 = w2 + w3;
-  vec2 t0 = (base - 0.5 + w1 / s0) * uInvSrc;
-  vec2 t1 = (base + 1.5 + w3 / s1) * uInvSrc;
-  return texture(uSrc, vec2(t0.x, t0.y)) * (s0.x * s0.y)
-       + texture(uSrc, vec2(t1.x, t0.y)) * (s1.x * s0.y)
-       + texture(uSrc, vec2(t0.x, t1.y)) * (s0.x * s1.y)
-       + texture(uSrc, vec2(t1.x, t1.y)) * (s1.x * s1.y);
-}
+${ROW_MAP_GLSL}
 
 void main(){
-  vec4 c = bicubic(vUv);
+  vec2 luv = vec2(vUv.x, screenToRow(vUv.y));
+  vec4 c = bicubicLod(uSrc, luv, uSrcRes, 0.0);
   if (uSharpen > 0.002) {
-    // Snap to the nearest texel corner first. A bilinear tap sitting exactly on
-    // a corner averages the four texels around it, making a 2x2 box. Four
-    // such taps one texel out on each diagonal instead make a 4x4 box.
-    vec2 corner = (floor(vUv / uInvSrc - 0.5) + 1.0) * uInvSrc;
-    vec4 wide = uInterleave == 2 ? texture(uSrc, corner) : (
-                texture(uSrc, corner + vec2(-1.0, -1.0) * uInvSrc)
-              + texture(uSrc, corner + vec2( 1.0, -1.0) * uInvSrc)
-              + texture(uSrc, corner + vec2(-1.0,  1.0) * uInvSrc)
-              + texture(uSrc, corner + vec2( 1.0,  1.0) * uInvSrc)) * 0.25;
+    // The box that matches the amortisation cell is the history's own mip: one
+    // level per doubling of the interleave. It used to be built here from
+    // bilinear taps snapped to texel corners, which does average the right
+    // texels but is then constant across each texel of the low buffer — so
+    // while the chase camera was pitching on the swell (which is always) every
+    // far cloud was drawn as a nearest-neighbour magnified box filter: soft
+    // blobs with hard, texel-sized rectangular edges. Cubic interpolation of
+    // the mip has the same frequency response and no grid of its own.
+    float lod = uInterleave == 2 ? 1.0 : 2.0;
+    vec4 wide = bicubicLod(uSrc, luv, uSrcRes / exp2(lod), lod);
     c = mix(c, wide, uSharpen);
   }
   c.a = clamp(c.a, 0.0, 1.0);
@@ -871,8 +958,17 @@ export class Clouds {
     this.slots = new Array(16);
     for (let i = 0; i < 16; i++) this.slots[BAYER[i]] = [i % 4, (i / 4) | 0];
 
+    // Row map (see ROW_MAP_GLSL); identity until the first update, and the
+    // previous frame's copy is what the reprojection reads history through.
+    this.rowV = new THREE.Vector4(0.25, 0.5, 0.75, 0);
+    this.rowS = new THREE.Vector4(0.25, 0.5, 0.75, 0);
+    this.prevRowV = this.rowV.clone();
+    this.prevRowS = this.rowS.clone();
+    const rowMap = { uRowV: { value: this.rowV }, uRowS: { value: this.rowS } };
+
     this.marchPass = new FullScreenPass(CLOUD_FRAG, {
       ...this.shared,
+      ...rowMap,
       uInvViewProj: U.uInvViewProjNJ,
       uCamPos: U.uCamPos,
       uLowRes: { value: new THREE.Vector2(1, 1) },
@@ -884,6 +980,8 @@ export class Clouds {
     }, { name: 'cloudMarch' });
 
     this.reprojPass = new FullScreenPass(CLOUD_REPROJ_FRAG, {
+      ...rowMap,
+      uPrevRowV: { value: this.prevRowV }, uPrevRowS: { value: this.prevRowS },
       uQuarter: { value: null }, uQuarterDiag: { value: null },
       uHistory: { value: null }, uHistoryDiag: { value: null },
       uPrevViewProj: U.uPrevViewProjNJ, uInvViewProj: U.uInvViewProjNJ,
@@ -897,7 +995,8 @@ export class Clouds {
     }, { name: 'cloudReproj' });
 
     this.upsamplePass = new FullScreenPass(CLOUD_UPSAMPLE_FRAG, {
-      uSrc: { value: null }, uInvSrc: { value: new THREE.Vector2() },
+      ...rowMap,
+      uSrc: { value: null },
       uSrcRes: { value: new THREE.Vector2() },
       uSharpen: { value: 0.0 },
       uInterleave: { value: 4 },
@@ -919,6 +1018,13 @@ export class Clouds {
 
   setQuality(q) {
     this.scale = q.cloudScale;
+    // Rows relative to cloudScale, and the switch for the row warp. The warp
+    // puts nearly every row above the horizon, so a buffer this much shorter
+    // still marches more sky rays than a uniform one did. Presets that do not
+    // set it keep a uniform buffer: the explorer's free camera looks up as
+    // often as out, and there the warp would only move rows out of the sky.
+    this.warpRows = q.cloudRowScale !== undefined;
+    this.rowScale = q.cloudRowScale ?? 1.0;
     this.interleave=q.cloudSteps>=96?2:4;
     this.activeSlots=this.interleave===2?this.slots.filter(([x,y])=>x<2&&y<2):this.slots;
     for(const pass of [this.marchPass,this.reprojPass,this.upsamplePass])pass.set('uInterleave',this.interleave);
@@ -944,7 +1050,7 @@ export class Clouds {
   setSize(w, h, force = false) {
     // the low buffer must be a multiple of 4 so the amortisation grid tiles
     const lw = Math.max(16, Math.ceil(w * this.scale / 4) * 4);
-    const lh = Math.max(16, Math.ceil(h * this.scale / 4) * 4);
+    const lh = Math.max(16, Math.ceil(h * this.scale * this.rowScale / 4) * 4);
     if (!force && this.lowW === lw && this.lowH === lh) return;
     this.fullW = w; this.fullH = h;
     this.lowW = lw; this.lowH = lh;
@@ -960,6 +1066,14 @@ export class Clouds {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     });
     this.history = new PingPong(lw, lh, { type: THREE.HalfFloatType, count: 2, name: 'cloudHist' });
+    // The colour history carries a mip chain: level log2(interleave) is the box
+    // filter the upsample uses to hide the amortisation grid while the camera
+    // moves. Both dimensions are multiples of four, so the boxes tile exactly.
+    // The depth target stays unfiltered — its sentinel must never be averaged.
+    for (const rt of [this.history.a, this.history.b]) {
+      rt.textures[0].generateMipmaps = true;
+      rt.textures[0].minFilter = THREE.LinearMipmapLinearFilter;
+    }
     this.fullRT = makeRT(w, h, { type: THREE.HalfFloatType, name: 'cloudFull' });
     this.marchPass.uniforms.uLowRes.value.set(lw, lh);
     this.reset = true;
@@ -976,6 +1090,8 @@ export class Clouds {
     const inv = U.uInvViewProjNJ.value;
     const prev = U.uPrevViewProjNJ.value;
     const cam = U.uCamPos.value;
+    // NDC y to a row of the low buffer, through the current row map.
+    const row = (y) => pwl(y * 0.5 + 0.5, this.rowV, this.rowS) * this.lowH;
     let worst = 0;
     for (const p of PROBE_NDC) {
       _pa.set(p[0], p[1], -1).applyMatrix4(inv);
@@ -985,10 +1101,51 @@ export class Clouds {
       // as a full disocclusion rather than reading a mirrored coordinate.
       if (!Number.isFinite(_pb.x) || !Number.isFinite(_pb.y)) return 1e3;
       const du = (_pb.x - p[0]) * 0.5 * this.lowW;
-      const dv = (_pb.y - p[1]) * 0.5 * this.lowH;
+      const dv = row(_pb.y) - row(p[1]);
       worst = Math.max(worst, Math.hypot(du, dv));
     }
     return worst;
+  }
+
+  /**
+   * Places the row-map knots around this frame's horizon. The horizon is the
+   * screen height of a ray at the same dip the march uses to reject sea rays,
+   * in the camera's forward azimuth; roll is ignored, the band is wide enough
+   * for the few degrees a chase camera leans. Rows are handed to each segment
+   * in proportion to its screen height times its weight, so when the horizon
+   * leaves the screen the map relaxes to uniform on its own.
+   */
+  _updateRowMap() {
+    if (!this.warpRows) {
+      this.rowV.set(0.25, 0.5, 0.75, 0);
+      this.rowS.copy(this.rowV);
+      return;
+    }
+    const inv = U.uInvViewProjNJ.value;
+    const vp = U.uViewProjNJ.value;
+    const cam = U.uCamPos.value;
+    _pa.set(0, 0, -1).applyMatrix4(inv);
+    _pb.set(0, 0, 1).applyMatrix4(inv).sub(_pa);
+    const hl = Math.hypot(_pb.x, _pb.z);
+    let vh = _pb.y > 0 ? -1 : 2;
+    if (hl > 1e-5) {
+      const dip = -Math.sqrt(2 * Math.max(cam.y, 0) / 6360000) - 0.003;
+      const c = Math.cos(dip);
+      _pa.set(_pb.x / hl * c, Math.sin(dip), _pb.z / hl * c).multiplyScalar(50000).add(cam);
+      const e = vp.elements;
+      const w = e[3] * _pa.x + e[7] * _pa.y + e[11] * _pa.z + e[15];
+      if (w > 1e-6) vh = _pa.applyMatrix4(vp).y * 0.5 + 0.5;
+    }
+    const k = ROW_KNOTS.map(d => THREE.MathUtils.clamp(vh + d, 0, 1));
+    const len = [k[0], k[1] - k[0], k[2] - k[1], 1 - k[2]];
+    let sum = 0;
+    for (let i = 0; i < 4; i++) sum += len[i] * ROW_WEIGHTS[i];
+    this.rowV.set(k[0], k[1], k[2], 0);
+    if (sum < 1e-6) { this.rowS.copy(this.rowV); return; }
+    const s0 = len[0] * ROW_WEIGHTS[0] / sum;
+    const s1 = s0 + len[1] * ROW_WEIGHTS[1] / sum;
+    const s2 = s1 + len[2] * ROW_WEIGHTS[2] / sum;
+    this.rowS.set(s0, s1, s2, 0);
   }
 
   /** @param {number} time seconds */
@@ -1013,6 +1170,16 @@ export class Clouds {
     this.marchPass.uniforms.uSlotOffset.value.set(slot[0], slot[1]);
     this.reprojPass.uniforms.uSlotOffset.value.set(slot[0], slot[1]);
     this.frame++;
+
+    // The uniforms hold these vectors by reference; the reprojection reads the
+    // history through last frame's map and writes it in this frame's.
+    this.prevRowV.copy(this.rowV);
+    this.prevRowS.copy(this.rowS);
+    this._updateRowMap();
+    if (this.reset || this.forceReset) {
+      this.prevRowV.copy(this.rowV);
+      this.prevRowS.copy(this.rowS);
+    }
 
     this.marchPass.render(r, this.quarterRT);
 
@@ -1041,7 +1208,6 @@ export class Clouds {
 
     this.upsamplePass.set('uSrc', this.history.read.textures[0]);
     this.upsamplePass.set('uSharpen', this._blockHide * 0.85);
-    this.upsamplePass.uniforms.uInvSrc.value.set(1 / this.lowW, 1 / this.lowH);
     this.upsamplePass.uniforms.uSrcRes.value.set(this.lowW, this.lowH);
     this.upsamplePass.render(r, this.fullRT);
 
