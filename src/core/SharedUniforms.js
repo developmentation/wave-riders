@@ -109,6 +109,15 @@ export const U = {
   uBottomVisible: { value: 0 },
   uCausticSlope: { value: null },
   uCausticSpan: { value: 128 },
+
+  // ---- submarine mode (game). Set by SubmarineWorld.setSubmerged(); read by
+  // the sky background, the sea seen from below, PropMaterial and the post
+  // composite so every pixel fogs toward the same water colour. uSubFog is
+  // (r, g, b) as a fraction of the sky irradiance plus fog density per metre;
+  // uSubAbsorb is the per-channel loss per metre of depth.
+  uSubmerged: { value: 0 },
+  uSubFog: { value: new THREE.Vector4(0.13, 0.40, 0.42, 0.038) },
+  uSubAbsorb: { value: new THREE.Vector3(0.045, 0.015, 0.006) },
 };
 
 /**

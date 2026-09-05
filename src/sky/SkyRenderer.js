@@ -111,6 +111,15 @@ uniform float uFogDensity;
 // Stand in a mirrored, water-tinted sky instead, as the env probe does.
 uniform float uSeaFill;
 uniform vec3 uSeaFillTint;
+// Submarine mode (game): the lens is under the sea, so any ray that misses the
+// surface mesh is looking through water. Paint it the water colour so auto
+// exposure meters the dive and not a sky nobody can see.
+uniform float uSubmerged;
+uniform vec4 uSubFog;
+uniform vec3 uSubAbsorb;
+uniform float uSeaLevel;
+uniform sampler2D uEnvMap;
+uniform float uEnvMaxLod;
 
 ${ATMO_COMMON}
 ${SHADING_GLSL}
@@ -128,24 +137,29 @@ void main(){
   vec4 p1 = uInvViewProj * vec4(ndc,  1.0, 1.0); p1 /= p1.w;
   vec3 dir = normalize(p1.xyz - p0.xyz);
 
-  // The LUTs store radiance per unit solar irradiance, so the sun's strength is
-  // applied here. The cloud layer already carries it — folding it in before the
-  // composite instead of after is the difference between a lit deck and one
-  // that is a hundred times too bright.
-  vec3 sky = renderSky(dir, uCamPos) * uSunIntensity;
+  vec3 sky;
+  if (uSubmerged > 0.5) {
+    sky = subFogRadiance(uSubFog, uSubAbsorb, subAmbient(uEnvMap, uEnvMaxLod), uSeaLevel - uCamPos.y, dir.y);
+  } else {
+    // The LUTs store radiance per unit solar irradiance, so the sun's strength is
+    // applied here. The cloud layer already carries it — folding it in before the
+    // composite instead of after is the difference between a lit deck and one
+    // that is a hundred times too bright.
+    sky = renderSky(dir, uCamPos) * uSunIntensity;
 
-  if (uCloudEnabled > 0.5) {
-    vec4 cl = texture(uCloudTex, vUv);
-    sky = sky * cl.a + cl.rgb;
-  }
+    if (uCloudEnabled > 0.5) {
+      vec4 cl = texture(uCloudTex, vUv);
+      sky = sky * cl.a + cl.rgb;
+    }
 
-  sky += uAmbientFlash * uLightningColor * 0.012 * max(0.0, 1.0 - abs(dir.y));
+    sky += uAmbientFlash * uLightningColor * 0.012 * max(0.0, 1.0 - abs(dir.y));
 
-  if (uSeaFill > 0.5 && dir.y < 0.0) {
-    float below = smoothstep(0.0, -0.03, dir.y);
-    vec3 lookDir = normalize(vec3(dir.x, abs(dir.y) * 0.35 + 0.02, dir.z));
-    vec3 mirrored = renderSky(lookDir, uCamPos) * uSunIntensity;
-    sky = mix(sky, mirrored * uSeaFillTint, below);
+    if (uSeaFill > 0.5 && dir.y < 0.0) {
+      float below = smoothstep(0.0, -0.03, dir.y);
+      vec3 lookDir = normalize(vec3(dir.x, abs(dir.y) * 0.35 + 0.02, dir.z));
+      vec3 mirrored = renderSky(lookDir, uCamPos) * uSunIntensity;
+      sky = mix(sky, mirrored * uSeaFillTint, below);
+    }
   }
 
   oColor = vec4(sky, 1.0);
@@ -246,6 +260,8 @@ export class SkyRenderer {
         uCloudTex: { value: null },
         uSeaFill: { value: 0 },
         uSeaFillTint: { value: new THREE.Vector3(0.16, 0.30, 0.38) },
+        uSubmerged: U.uSubmerged, uSubFog: U.uSubFog, uSubAbsorb: U.uSubAbsorb,
+        uSeaLevel: U.uSeaLevel, uEnvMap: U.uEnvMap, uEnvMaxLod: U.uEnvMaxLod,
       },
       // Drawn after the opaque scene at the far plane with a depth test, so the
       // sky only shades pixels nothing else covered instead of being overdrawn

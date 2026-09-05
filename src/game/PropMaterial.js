@@ -53,6 +53,21 @@ void main(){
   p.x += sin(uTime * 6.0 + position.z * 3.0 + position.y * 2.0) * flutter;
   pPrev.x += sin((uTime - uDt) * 6.0 + position.z * 3.0 + position.y * 2.0) * flutter;
   #endif
+  #ifdef KELP_WAVE
+  // Kelp sway (submarine world): uv.y is the height fraction along the strand
+  // (0 root, 1 tip), uv.x a per-strand phase. Slow, two lobes so the fronds do
+  // not all nod together; the tip travels uWave metres. Same offset one frame
+  // back for the motion vectors.
+  {
+    float sway = uv.y * uv.y * uWave;
+    float ph = uTime * 0.9 + uv.x * 6.2831853;
+    p.x += (sin(ph) + 0.35 * sin(ph * 2.3 + position.z * 0.7)) * sway;
+    p.z += cos(ph * 0.8 + 1.7) * sway * 0.6;
+    float php = ph - uDt * 0.9;
+    pPrev.x += (sin(php) + 0.35 * sin(php * 2.3 + position.z * 0.7)) * sway;
+    pPrev.z += cos(php * 0.8 + 1.7) * sway * 0.6;
+  }
+  #endif
   vec4 wp = modelMatrix * vec4(p, 1.0);
   vec4 pwp = uPrevModelMatrix * vec4(pPrev, 1.0);
   vWorld = wp.xyz;
@@ -96,6 +111,8 @@ uniform vec3 uLightningColor;
 uniform float uAmbientFlash;
 uniform float uFogDensity;
 uniform float uSeaLevel;
+uniform float uSubmerged;
+uniform vec3 uSubAbsorb;
 in vec3 vWorld;
 in vec3 vNormal;
 in vec2 vUv;
@@ -157,6 +174,10 @@ void main(){
   // Storm haze
   float fog = 1.0 - exp(-dist * uFogDensity * 0.0025);
   color = mix(color, skyAmb * 2.2, fog * 0.8);
+  // Submarine mode: daylight fades on its way down to a prop under the sea,
+  // red first. The water between the prop and the lens is fogged by the post
+  // composite, so only the prop's own depth counts here.
+  if (uSubmerged > 0.5) color *= exp(-uSubAbsorb * max(uSeaLevel - vWorld.y, 0.0));
 
   oColor = vec4(color, uOpacity);
   vec2 cur = vClipNJ.xy / max(vClipNJ.w, 1e-6);
@@ -167,7 +188,7 @@ void main(){
 
 export class PropMaterial extends THREE.RawShaderMaterial {
   /**
-   * @param {object} opts { map, color, emissive, roughness, metal, vertexColors, flagWave, opacity, transparent }
+   * @param {object} opts { map, color, emissive, roughness, metal, vertexColors, flagWave, kelpWave, opacity, transparent, side }
    * @param {import('../sky/Atmosphere.js').Atmosphere} atmosphere
    */
   constructor(opts = {}, atmosphere) {
@@ -180,20 +201,23 @@ export class PropMaterial extends THREE.RawShaderMaterial {
       uRoughness: { value: opts.roughness ?? 0.55 },
       uMetal: { value: opts.metal ?? 0.0 },
       uOpacity: { value: opts.opacity ?? 1.0 },
-      uWave: { value: opts.flagWave ?? 0 },
+      uWave: { value: opts.flagWave ?? opts.kelpWave ?? 0 },
     };
     if (atmosphere) atmosphere.bind(uniforms);
     // Shared frame/lighting uniforms win over the private copies bind() created.
     for (const k of ['uTime', 'uDt', 'uCamPos', 'uResolution', 'uViewProjNJ', 'uPrevViewProjNJ', 'uSunDir', 'uSunColor',
       'uSunIntensity', 'uEnvMap', 'uEnvMaxLod', 'uLightning0', 'uLightning1', 'uLightningColor', 'uAmbientFlash',
-      'uFogDensity', 'uSeaLevel']) uniforms[k] = U[k];
+      'uFogDensity', 'uSeaLevel', 'uSubmerged', 'uSubAbsorb']) uniforms[k] = U[k];
     super({
       name: 'Prop',
       glslVersion: THREE.GLSL3,
       vertexShader: VERT,
       fragmentShader: FRAG,
       uniforms,
-      defines: { ...(opts.vertexColors ? { USE_VCOLOR: 1 } : {}), ...(opts.flagWave ? { FLAG_WAVE: 1 } : {}) },
+      defines: {
+        ...(opts.vertexColors ? { USE_VCOLOR: 1 } : {}), ...(opts.flagWave ? { FLAG_WAVE: 1 } : {}),
+        ...(opts.kelpWave ? { KELP_WAVE: 1 } : {}),
+      },
       side: opts.side ?? THREE.FrontSide,
       transparent: !!opts.transparent,
       depthWrite: opts.depthWrite ?? true,

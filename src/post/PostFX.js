@@ -417,6 +417,17 @@ uniform vec3 uFlashColor;
 uniform float uTonemapMode;
 uniform float uExposureBias;
 uniform float uDebugPass;
+// Submarine mode (game): fog by the velocity buffer's view distance toward the
+// water colour. Uniform-gated; costs nothing on the surface.
+uniform sampler2D uVelocity;
+uniform mat4 uInvViewProj;
+uniform vec3 uCamPos;
+uniform float uSeaLevel;
+uniform sampler2D uEnvMap;
+uniform float uEnvMaxLod;
+uniform float uSubmerged;
+uniform vec4 uSubFog;
+uniform vec3 uSubAbsorb;
 in vec2 vUv;
 layout(location = 0) out vec4 oColor;
 
@@ -461,6 +472,17 @@ void main(){
     vec3 bloom = texture(uBloom, vUv).rgb;
     float dirt = uWetLens > 0.0001 ? lensDirt(vUv) : 0.0;
     col += bloom * uBloomStrength * (1.0 + dirt * uWetLens * 3.0);
+  }
+
+  if (uSubmerged > 0.5) {
+    // Every pass writes its linear view distance to velocity.z (sky = 40 km),
+    // so one exponential here fogs the seabed, the props, the ceiling and the
+    // sky alike. The fog colour is in scene radiance, hence before exposure.
+    float dist = texture(uVelocity, vUv).z;
+    vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 dir = normalize(far.xyz / far.w - uCamPos);
+    vec3 fogCol = subFogRadiance(uSubFog, uSubAbsorb, subAmbient(uEnvMap, uEnvMaxLod), uSeaLevel - uCamPos.y, dir.y);
+    col = mix(col, fogCol, 1.0 - exp(-max(dist, 0.0) * uSubFog.w));
   }
 
   col *= exposure;
@@ -683,6 +705,9 @@ export class PostFX {
           uRainStreaks: { value: 0 }, uFlash: { value: 0 },
           uFlashColor: { value: this.flashColor }, uTonemapMode: { value: 0 },
           uExposureBias: { value: 1.0 }, uDebugPass: { value: 0 },
+          uVelocity: { value: null }, uInvViewProj: U.uInvViewProj, uCamPos: U.uCamPos, uSeaLevel: U.uSeaLevel,
+          uEnvMap: U.uEnvMap, uEnvMaxLod: U.uEnvMaxLod,
+          uSubmerged: U.uSubmerged, uSubFog: U.uSubFog, uSubAbsorb: U.uSubAbsorb,
         }, { name: 'composite' }),
         cas: new FullScreenPass(CAS_FRAG, {
           uSrc: { value: null }, uInvResolution: { value: new THREE.Vector2() }, uSharpness: { value: 0.5 },
@@ -816,7 +841,8 @@ export class PostFX {
       .set('uSaturation', s.saturation).set('uContrast', s.contrast).set('uLift', s.lift)
       .set('uWetLens', s.wetLens).set('uFlash', s.flash)
       .set('uTonemapMode', s.tonemap).set('uExposureBias', s.exposureBias)
-      .set('uDebugPass', s.debugPassthrough ? 1 : 0);
+      .set('uDebugPass', s.debugPassthrough ? 1 : 0)
+      .set('uVelocity', velTex);
     c.uniforms.uResolution.value.set(w, h);
     c.uniforms.uFlashColor.value.copy(this.flashColor);
 

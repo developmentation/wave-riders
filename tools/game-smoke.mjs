@@ -79,7 +79,7 @@ if (booted) {
   await sleep(1500);
   await shot('start');
   let t = 0;
-  const keyName = (k) => ({ W: 'KeyW', A: 'KeyA', S: 'KeyS', D: 'KeyD', SPACE: 'Space', R: 'KeyR', C: 'KeyC' })[k] || k;
+  const keyName = (k) => ({ W: 'KeyW', A: 'KeyA', S: 'KeyS', D: 'KeyD', Q: 'KeyQ', E: 'KeyE', SPACE: 'Space', R: 'KeyR', C: 'KeyC' })[k] || k;
   const steps = script.split(',').filter(Boolean).map(s => { const [k, d] = s.split(':'); return { key: keyName(k), dur: parseFloat(d || '1') }; });
   const held = new Set(['KeyW']);
   for (const st of steps) {

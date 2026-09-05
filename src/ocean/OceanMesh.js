@@ -269,7 +269,20 @@ void main(){
   // grazing rays, where a wavy surface offers many intersections and adjacent
   // rays converge on different ones. The mesh comes apart into contour
   // terraces. A constant is continuous by construction.
-  float eyeHeight = max(uCamPos.y - (uSeaLevel + uGridPlane), 0.35);
+  float eyeRel = uCamPos.y - (uSeaLevel + uGridPlane);
+#ifdef GAME_LITE
+  // Submarine mode: the lens is under the sea and the surface is a ceiling.
+  // update() then puts the reference plane on the surface itself, so eyeRel
+  // is negative. Mirror the projection about that plane — a ray at pitch +p
+  // from d metres below meets it at the same xz as a ray at pitch -p from d
+  // metres above — and the grid lands on exactly the stretch of ceiling the
+  // frame is looking at, instead of every ray missing the plane upward and
+  // collapsing onto the horizon ring.
+  float mirror = eyeRel < 0.0 ? -1.0 : 1.0;
+  dir.y *= mirror;
+  eyeRel = abs(eyeRel);
+#endif
+  float eyeHeight = max(eyeRel, 0.35);
 
   vec2 hit = seaHit(dir, eyeHeight);
   float t = hit.x;
@@ -343,6 +356,10 @@ void main(){
   vec2 ndcDv = (vec2(aGrid.x, aGrid.y + 1.0 / uGridSize.y) * 2.0 - 1.0) * uGridMargin;
   vec3 dirU = rayFor(ndcDu);
   vec3 dirV = rayFor(ndcDv);
+#ifdef GAME_LITE
+  dirU.y *= mirror;
+  dirV.y *= mirror;
+#endif
   // Scale the neighbours by however far the refinement moved this vertex.
   // Re-solving for each of them costs three times the search; the ratio is
   // accurate wherever the two rays land on the same face, which is the only
@@ -404,6 +421,8 @@ uniform vec3 uLightningColor;
 uniform float uAmbientFlash;
 uniform float uExposure;
 uniform float uUnderwater;
+uniform vec4 uSubFog;
+uniform vec3 uSubAbsorb;
 uniform float uDebugMode;
 uniform float uBottomVisible;
 uniform float uBioStrength;
@@ -798,6 +817,25 @@ void main(){
     color = mix(through, color, 0.18);
   }
 
+#ifdef GAME_LITE
+  // Submarine mode, lens under the sea: the surface is a ceiling. Straight up
+  // it is Snell's window — the sky refracted through the ripples, bright
+  // enough to blow out — and past the critical angle (~48 deg, NoV < 0.66) it
+  // is a mirror pointing back into the water, so it fades to the same fog
+  // colour the composite blends everything toward. N already faces the lens
+  // (backLit flipped it), which is the convention refract() wants. The env
+  // probe at a coarse mip carries a softened sun, so the ripples throw
+  // dancing glitter without fireflies.
+  if (uUnderwater > 0.5) {
+    vec3 T = refract(-V, N, 1.333);
+    if (dot(T, T) < 0.5) T = normalize(vec3(N.x, 0.2, N.z) + vec3(1e-4, 0.0, 0.0));
+    float window = smoothstep(0.58, 0.78, NoV);
+    vec3 through = textureLod(uEnvMap, dirToEquirect(T), 2.0).rgb * 0.5;
+    vec3 mirrorCol = subFogRadiance(uSubFog, uSubAbsorb, subAmbient(uEnvMap, uEnvMaxLod), uSeaLevel - uCamPos.y, -0.3);
+    color = mix(mirrorCol, through, window);
+  }
+#endif
+
   // ---------------------------------------------------------------- foam mat
   if (foam > 0.002 || foamThin > 0.002) {
     float foamAO = mix(0.62, 1.0, foamFine);
@@ -1054,7 +1092,13 @@ export class OceanMesh {
    * tsunami — which is well below mean sea level and entirely above water.
    */
   update(camPos, surfaceY = 0) {
-    this.uniforms.uUnderwater.value = camPos.y < surfaceY ? 1 : 0;
+    const under = camPos.y < surfaceY;
+    this.uniforms.uUnderwater.value = under ? 1 : 0;
+    // Game mode has no submerged compositing pass, so from under the sea the
+    // surface itself is drawn as the ceiling, projected from a lens mirrored
+    // about the surface (see VERT). That needs the reference plane on the
+    // surface, not App's "half a metre under the lens".
+    if (this.lite && under) this.uniforms.uGridPlane.value = surfaceY - U.uSeaLevel.value;
     this.nearMesh.visible=Math.abs(camPos.y-surfaceY)<35;
     this.uniforms.uNearPatchEnabled.value=this.nearMesh.visible?1:0;
     this.uniforms.uPatchOrigin.value.set(camPos.x,camPos.z);

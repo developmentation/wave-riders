@@ -149,7 +149,7 @@ export class Game {
   start() {
     const skip = this.params.get('skip'); // skip=title → straight into the hub; skip=race → straight into a race world
     if (this.params.get('mods') || skip === 'title' || !this.hud) { this.enterHub(); }
-    else if (skip && this.mods.Worlds?.WORLDS?.[skip]) { this.enterWorld(skip); }
+    else if (skip && (this.mods.Worlds?.WORLDS?.[skip] || this.mods.SubmarineWorld?.SUB_WORLDS?.[skip])) { this.enterWorld(skip); }
     else this.showTitle();
   }
 
@@ -247,6 +247,7 @@ export class Game {
     if (SW?.buildSubWorld && SW.SUB_WORLDS?.[id]) {
       this.world = SW.buildSubWorld(id, { app: this.app, atmosphere: this.app.atmosphere, scene: this.scene, game: this });
       if (this.world.group && !this.world.group.parent) this.scene.add(this.world.group);
+      this.app.discardNextFrameTiming = true;
       const wk = this.world.def?.weather;
       if (W?.applyWorldWeather && wk) W.applyWorldWeather(this.app, this.world.def, immediate);
       else { this.setWeather(wk?.key || 'clear', immediate); if (wk?.patch) this.app.weather.set(wk.patch, immediate); }

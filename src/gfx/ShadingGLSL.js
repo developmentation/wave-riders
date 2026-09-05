@@ -149,5 +149,25 @@ vec3 linearToSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(max(c, vec3(1e-5)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+/**
+ * Submarine mode (game): radiance of the water column itself, the colour the
+ * sky background, the sea seen from below and the post composite all fog
+ * toward, so the frame reads as one body of water. Scaled by the sky
+ * ambient (subAmbient) so it follows exposure and time of day; darker and bluer the
+ * deeper the lens (red dies first); brighter looking up toward the surface
+ * than down into the deep.
+ * fog = (r, g, b, density), absorb = per-metre loss, lensDepth in metres.
+ */
+vec3 subAmbient(sampler2D env, float maxLod) {
+  // One tap on the probe's top mip: the whole-sphere mean, which tracks the sky
+  // irradiance closely enough for a fog colour and costs a ninth of it.
+  return textureLod(env, vec2(0.5), maxLod).rgb * 1.7;
+}
+vec3 subFogRadiance(vec4 fog, vec3 absorb, vec3 skyAmb, float lensDepth, float dirY) {
+  vec3 tint = fog.rgb * exp(-absorb * max(lensDepth, 0.0));
+  float up = mix(0.55, 1.5, smoothstep(-0.6, 0.7, dirY));
+  return tint * skyAmb * up;
+}
+
 #endif
 `;
