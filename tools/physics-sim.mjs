@@ -2,7 +2,7 @@
 // node tools/physics-sim.mjs
 import { BoatPhysics, HULLS } from '../src/game/BoatPhysics.js';
 import * as THREE from 'three';
-const sea = { sample(x, z, out) { return out.set(0, 0, 0); }, heightAt() { return 0; } };
+const sea = { lastDhdt: 0, sample(x, z, out) { return out.set(0, 0, 0); }, heightAt() { return 0; } };
 for (const name of ['speedboat', 'jetski']) {
   const b = new BoatPhysics(HULLS[name], sea);
   b.setPose(0, 0, 0, 0);

@@ -17,6 +17,8 @@ import * as THREE from 'three';
  */
 const G = 9.81;
 const WATER_RHO = 1000;
+/** Buoyancy spring stiffness factor; at rest each point sinks draft / SPRING_FACTOR. Boats.js uses it to place the hull. */
+export const SPRING_FACTOR = 1.8;
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _f = new THREE.Vector3();
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
 const _sample = new THREE.Vector3();
@@ -92,8 +94,10 @@ export class BoatPhysics {
     // Spring per point so the total displaced volume at nominal draft carries
     // the weight; a stiffer spring reads as a hard, slappy hull.
     this.pointCount = hull.buoyancyPoints.length;
-    this.springK = (m * G) / (hull.draft * this.pointCount) * 1.35;
-    this.damping = 2 * Math.sqrt(this.springK * m / this.pointCount) * 0.55;
+    // Stiff and well damped: the hull should track the surface closely rather
+    // than sink into a rising wave and pop out of a falling one.
+    this.springK = (m * G) / (hull.draft * this.pointCount) * SPRING_FACTOR;
+    this.damping = 2 * Math.sqrt(this.springK * m / this.pointCount) * 0.7;
     this._localPoints = hull.buoyancyPoints.map(p => new THREE.Vector3(...p));
     this._sinkTimer = 0;
   }
@@ -144,6 +148,7 @@ export class BoatPhysics {
       const lp = this._localPoints[i];
       _p.copy(lp).applyQuaternion(this.quaternion).add(this.position);
       const s = this.sea.sample(_p.x, _p.z, _sample);
+      const waterVy = this.sea.lastDhdt || 0;   // surface vertical velocity here
       const depth = s.x - _p.y;
       if (depth <= 0) continue;
       wet++;
@@ -157,7 +162,8 @@ export class BoatPhysics {
       // Planing lift: at speed the hull rides on the water rather than in it,
       // so the springs ease off and the boat lifts and levels out.
       const k = this.springK * (1 - planing * 0.45);
-      let fy = k * Math.min(depth, hull.draft * 2.5) - this.damping * _v.y * (1 + planing * 0.6);
+      // Damping on the velocity relative to the water, not the world.
+      let fy = k * Math.min(depth, hull.draft * 2.5) - this.damping * (_v.y - waterVy) * (1 + planing * 0.6);
       if (fy < 0) fy *= 0.35; // water does not pull the hull down
       const lift = fy + m * G / this.pointCount * planing * 0.5 * (lp.z > 0 ? 1.25 : 0.75);
       // Along the wave normal: a face slope shoves the hull sideways as well as up.

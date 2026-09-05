@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CONDITIONS } from '../ui/Sandbox.js';
-import { WaveField } from './WaveField.js';
+import { Sea } from './WaveField.js';
 import { BoatPhysics, HULLS } from './BoatPhysics.js';
 import { Controls } from './Controls.js';
 import { FollowCamera } from './FollowCamera.js';
@@ -36,7 +36,7 @@ export class Game {
     this.app = app;
     this.scene = app.scene;
     this.params = new URLSearchParams(location.search);
-    this.sea = new WaveField(app, { cells: 64, span: 200 });
+    this.sea = new Sea(app, { coarse: { cells: 64, span: 200 }, fine: { cells: 40, span: 30 } });
     this.controls = new Controls();
     this.camera = new FollowCamera(app, this.sea);
     this.loader = new GLTFLoader();

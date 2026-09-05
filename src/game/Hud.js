@@ -45,6 +45,7 @@ const ICON = {
   chevron: svg('<path d="M50 4 90 48H66v46H34V48H10z" fill="currentColor" stroke="#05324f" stroke-width="7" stroke-linejoin="round"/>', '0 0 100 100'),
   camera: svg('<path d="M4 8h4l2-3h4l2 3h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z" fill="currentColor"/><circle cx="12" cy="14" r="3.5" fill="#05324f"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>'),
   pause: svg('<rect x="5" y="4" width="5" height="16" rx="1.5" fill="currentColor"/><rect x="14" y="4" width="5" height="16" rx="1.5" fill="currentColor"/>'),
+  home: svg('<path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10.5V20h12v-9.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="#05324f"/>'),
   play: svg('<path d="M7 4.5v15l13-7.5z" fill="currentColor"/>'),
   reset: svg('<path d="M20 12a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M20 3v6h-6z" fill="currentColor"/>'),
   sound: svg('<path d="M3 9v6h4l5 4V5L7 9z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>'),
@@ -271,7 +272,8 @@ export class Hud {
       <button class="wr-sysbtn" data-act="camera" aria-label="Camera">${ICON.camera}</button>
       <button class="wr-sysbtn" data-act="reset" aria-label="Reset boat">${ICON.reset}</button>
       <button class="wr-sysbtn" data-act="mute" aria-label="Sound">${ICON.sound}</button>
-      <button class="wr-sysbtn wr-pausebtn" data-act="pause" aria-label="Pause">${ICON.pause}</button>`);
+      <button class="wr-sysbtn wr-pausebtn" data-act="pause" aria-label="Pause">${ICON.pause}</button>
+      <button class="wr-sysbtn wr-homebtn" data-act="exit" aria-label="Back to the harbour">${ICON.home}</button>`);
     const touch = el('div', 'wr-touch', `
       <div class="wr-left">
         <div class="wr-wheel" data-ctl="wheel" role="slider" aria-label="Steering wheel">${ICON.wheel}</div>

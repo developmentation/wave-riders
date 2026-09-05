@@ -64,6 +64,11 @@ async function shot(name) {
 const stats = () => page.evaluate(() => window.__game?.stats?.());
 
 const poke = getArg('poke', '');
+// --late "seconds:js" runs a second poke that many seconds into the drive script.
+const late = getArg('late', '');
+const lateAt = late ? parseFloat(late.split(':')[0]) : -1;
+const lateJs = late ? late.slice(late.indexOf(':') + 1) : '';
+let lateDone = false;
 if (booted && poke) {
   await page.evaluate((p) => { new Function('app', 'game', `with(app){${p}}`)(window.__app, window.__game); }, poke);
   console.log(`> poke ${poke}`);
@@ -85,7 +90,13 @@ if (booted) {
     while (Date.now() - t0 < dur * 1000) {
       await sleep(500);
       const s = await stats();
-      if (s) samples.push({ t: +(t + (Date.now() - t0) / 1000).toFixed(1), ...s });
+      const now = t + (Date.now() - t0) / 1000;
+      if (s) samples.push({ t: +now.toFixed(1), ...s });
+      if (lateJs && !lateDone && now >= lateAt) {
+        lateDone = true;
+        await page.evaluate((p) => { new Function('app', 'game', `with(app){${p}}`)(window.__app, window.__game); }, lateJs).catch(e => console.log('late poke failed', e.message));
+        console.log(`> late poke at ${now.toFixed(1)}s`);
+      }
     }
     if (st.key !== 'KeyW') await page.keyboard.up(st.key);
     t += dur;
