@@ -413,7 +413,11 @@ export class Hud {
     t.addEventListener('pointerup', (e) => this._pointerUp(e));
     t.addEventListener('pointercancel', (e) => this._pointerUp(e));
     t.addEventListener('lostpointercapture', (e) => this._pointerUp(e));
-    for (const ev of ['touchstart', 'touchmove', 'touchend']) r.addEventListener(ev, (e) => { if (e.cancelable && e.target.closest('.wr-touch, .wr-screen')) e.preventDefault(); }, opts);
+    // Only the drive controls swallow raw touch events (they are driven by
+    // pointer events). Menu screens must NOT: preventDefault on touchstart/end
+    // suppresses the synthesized click, which made PLAY dead on phones.
+    // Scrolling/zooming on screens is already blocked by touch-action: none.
+    for (const ev of ['touchstart', 'touchmove', 'touchend']) r.addEventListener(ev, (e) => { if (e.cancelable && e.target.closest('.wr-touch')) e.preventDefault(); }, opts);
     r.addEventListener('contextmenu', (e) => e.preventDefault());
     r.addEventListener('dblclick', (e) => e.preventDefault());
     document.addEventListener('gesturestart', (e) => e.preventDefault(), opts);
