@@ -158,3 +158,42 @@ new Hud(game) ; hud.show('title'|'garage'|'hub'|'race'|'results'|'paused') ; hud
 // Audio.js
 new GameAudio() ; unlock() ; setEngine(type, { rpm, load, speed }) ; splash(i) ; gate() ; portal() ; countdown(n) ; horn(type) ; music(on) ; mute(bool)
 ```
+
+## Expansion 2: giant swell, perfect storm, submarine
+
+New surface worlds (Worlds.js): `giant` ("Titan Swell": 15 m / 50 ft swell, period ~17 s, broadly
+spaced, sunny) and `tempest` ("The Perfect Storm": Beaufort 11, night-dark, rain 1.0, lightning
+rate high, Hs ~8 m, periodic rogue waves via `app.director`). Hub gets six portals: lagoon, swell,
+storm, giant, tempest, deep. World defs may set `probeSpan` (coarse wave grid width in metres; giant
+uses 400) so gates and AI ride the real waves.
+
+Underwater world (`deep`, "The Deep Run") — a submarine mode:
+
+```js
+// SubmarineWorld.js
+export const SUB_WORLDS = { deep };
+// def: { id, name, icon: 'submarine', underwater: true, weather: { key, patch },
+//   fog: { color: [r,g,b], density },                 // underwater look
+//   start: { x, y, z, heading },                       // y negative = depth
+//   gates: [{ x, y, z, heading, width }], laps,        // hoops at depth, in order
+//   portals: [{ x, z, heading, dest: 'hub' }],         // at the surface, near start
+//   bounds }
+export function buildSubWorld(id, ctx)  // ctx = { app, atmosphere, scene, game } → { id, def, group, heightAt(x,z) /* seabed y */, dispose(), update(dt, camera) }
+export function setSubmerged(app, on, fog)  // toggles the sky/ocean/post underwater look; cheap
+
+// Submarine.js
+export class SubPhysics { position, quaternion, velocity, forward, right, up, heading, pitch, depth, speed, speedKmh,
+  throttle (-0.5..1), steer (-1..1, +right), dive (-1..1, +up), boost, submersion (1 when under), isSub = true,
+  groundFn (seabed), ceilingFn (sea surface height), hull: { length, width, maxSpeed, ... }
+  update(dt); setPose(x, y, z, heading); reset(); rescue() }
+export async function buildSubVisual({ atmosphere, colorIndex }) → THREE.Group with update(dt, body)
+
+// SubRace.js — same surface as Race.js (setup/start/update/dispose, state, countdown, time, laps,
+// player {lap,nextGate,position,finished,finishTime,progress}, standings, acceptsInput, nextGatePos,
+// nextGateDir() (yaw, +right) plus nextGatePitch() (rad, +up), onGate/onLap/onFinish/onCountdown)
+// but gates are 3D hoops and AI drivers are submarines spawned with game.spawnSub(x, y, z, heading).
+
+// Controls.js: controls.dive (-1..1, +up) from Q/E keys, gamepad LB/RB, touch ▲▼ via setVirtual({ dive }).
+// Hud.js: when frameData.submerged is true show a depth gauge and touch dive buttons; frameData.nextGatePitch.
+// FollowCamera: camera.mode = 'sub' follows in 3D and stays below the surface while submerged.
+```

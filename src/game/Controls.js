@@ -8,10 +8,11 @@ export class Controls {
     this.throttle = 0;   // -0.5 .. 1 (negative = reverse)
     this.steer = 0;      // -1 .. 1 (positive = right)
     this.boost = false;
+    this.dive = 0;       // -1..1, +up (submarine mode)
     this.horn = false;
     this.actions = new Set();       // one-frame events: 'reset', 'camera', 'pause', 'horn'
     this._keys = new Set();
-    this._virtual = { throttle: 0, steer: 0, brake: 0, boost: false, active: false };
+    this._virtual = { throttle: 0, steer: 0, brake: 0, boost: false, dive: 0, active: false };
     this._tilt = { enabled: false, value: 0 };
     this._steerSmooth = 0;
     this._throttleSmooth = 0;
@@ -48,7 +49,7 @@ export class Controls {
 
   update(dt) {
     const k = this._keys;
-    let throttle = 0, steer = 0, brake = 0, boost = false;
+    let throttle = 0, steer = 0, brake = 0, boost = false, dive = 0;
     let any = false;
 
     if (k.has('KeyW') || k.has('ArrowUp')) { throttle += 1; any = true; }
@@ -56,6 +57,8 @@ export class Controls {
     if (k.has('KeyA') || k.has('ArrowLeft')) { steer -= 1; any = true; }
     if (k.has('KeyD') || k.has('ArrowRight')) { steer += 1; any = true; }
     if (k.has('ShiftLeft') || k.has('ShiftRight') || k.has('Space')) boost = true;
+    if (k.has('KeyQ')) { dive -= 1; any = true; }
+    if (k.has('KeyE')) { dive += 1; any = true; }
 
     // gamepad
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -69,7 +72,9 @@ export class Controls {
       steer += gs;
       throttle += rt + (a ? 1 : 0);
       brake = Math.max(brake, lt);
-      if (gp.buttons[1]?.pressed || gp.buttons[5]?.pressed) boost = true;
+      if (gp.buttons[1]?.pressed) boost = true;
+      if (gp.buttons[4]?.pressed) dive -= 1;   // LB down
+      if (gp.buttons[5]?.pressed) dive += 1;   // RB up
       if (gp.buttons[3]?.pressed && !this._gpY) this._pending.add('reset');
       this._gpY = gp.buttons[3]?.pressed;
       if (gp.buttons[2]?.pressed && !this._gpX) this._pending.add('camera');
@@ -86,6 +91,7 @@ export class Controls {
       brake = Math.max(brake, v.brake);
       steer += v.steer;
       boost = boost || v.boost;
+      dive += v.dive || 0;
       any = true;
     }
     if (this._tilt.enabled) steer += this._tilt.value;
@@ -105,6 +111,9 @@ export class Controls {
     this.throttle = Math.abs(this._throttleSmooth) < 0.005 ? 0 : this._throttleSmooth;
     this.brake = brake;
     this.boost = boost;
+    const dk = 1 - Math.exp(-dt * 6);
+    this._diveSmooth = (this._diveSmooth || 0) + (Math.max(-1, Math.min(1, dive)) - (this._diveSmooth || 0)) * dk;
+    this.dive = Math.abs(this._diveSmooth) < 0.005 ? 0 : this._diveSmooth;
     this.active = any;
 
     this.actions = this._pending;

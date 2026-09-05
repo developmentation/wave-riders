@@ -93,6 +93,16 @@ export class WaveField {
   /** Move the grid so it is centred on (x, z). Call before update(). */
   setFocus(x, z) { this.focus.set(x, z); }
 
+  /** Change the grid's world width (metres); worlds with long swell ask for more. */
+  setSpan(span) {
+    if (span === this.span) return;
+    this.span = span;
+    this.pass.uniforms.uSpan.value = span;
+    const cell = span / (this.cells - 1);
+    this.pass.uniforms.uEps.value = Math.max(0.15, Math.min(0.75, cell * 0.25));
+    this.ready = false;   // old grids no longer match the new footprint
+  }
+
   /** True when (x, z) lies inside the last collected grid. */
   contains(x, z) {
     if (!this.ready) return false;
@@ -230,6 +240,7 @@ export class Sea {
   setFineFocus(x, z) { this.fine.setFocus(x, z); }
 
   update() { this.coarse.update(); this.fine.update(); }
+  setSpan(span) { this.coarse.setSpan(span); }
 
   meanHeight(x, z) { return this.coarse.meanHeight(x, z); }
 

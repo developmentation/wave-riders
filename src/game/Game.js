@@ -82,11 +82,12 @@ export class Game {
     // Fill any gap between wave rows with water-coloured sky (no submerged pass in game mode).
     if (app.surfaceOnly) app.sky.bgMaterial.uniforms.uSeaFill.value = 1;
 
-    const [Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam] = await Promise.all([
+    const [Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam, SubmarineWorld, Submarine, SubRace] = await Promise.all([
       optional('./Boats.js'), optional('./Worlds.js'), optional('./Hud.js'), optional('./Audio.js'),
       optional('./Race.js'), optional('./Portals.js'), optional('./Wake.js'), optional('./ShoreFoam.js'),
+      optional('./SubmarineWorld.js'), optional('./Submarine.js'), optional('./SubRace.js'),
     ]);
-    this.mods = { Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam };
+    this.mods = { Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam, SubmarineWorld, Submarine, SubRace };
     if (ShoreFoam?.ShoreFoam) this.shoreFoam = new ShoreFoam.ShoreFoam(this);
 
     if (Audio?.GameAudio) {
@@ -238,11 +239,18 @@ export class Game {
   }
 
   async loadWorld(id, immediate = true) {
-    const W = this.mods.Worlds;
+    const W = this.mods.Worlds, SW = this.mods.SubmarineWorld;
     this.world?.dispose?.();
     this.world = null;
     this.app.director?.clearEvents?.();
-    if (W?.buildWorld && W.WORLDS?.[id]) {
+    this._setSubmerged(false);
+    if (SW?.buildSubWorld && SW.SUB_WORLDS?.[id]) {
+      this.world = SW.buildSubWorld(id, { app: this.app, atmosphere: this.app.atmosphere, scene: this.scene, game: this });
+      if (this.world.group && !this.world.group.parent) this.scene.add(this.world.group);
+      const wk = this.world.def?.weather;
+      if (W?.applyWorldWeather && wk) W.applyWorldWeather(this.app, this.world.def, immediate);
+      else { this.setWeather(wk?.key || 'clear', immediate); if (wk?.patch) this.app.weather.set(wk.patch, immediate); }
+    } else if (W?.buildWorld && W.WORLDS?.[id]) {
       this.world = W.buildWorld(id, { app: this.app, atmosphere: this.app.atmosphere, scene: this.scene, game: this });
       if (this.world.group && !this.world.group.parent) this.scene.add(this.world.group);
       if (W.applyWorldWeather) W.applyWorldWeather(this.app, this.world.def, immediate);
@@ -260,6 +268,7 @@ export class Game {
       this.world = { id, def: { id, start: { x: 0, z: 0, heading: 0 }, portals: [], gates: [] }, heightAt: () => -50, dispose() {} };
     }
     this.world.id = id;
+    this.sea.setSpan?.(this.world.def?.probeSpan || 200);
     this.shoreFoam?.build?.(this.world);
     for (const b of this.boats) b.body.groundFn = this.world.heightAt || null;
     this.portals?.build?.(this.world.def?.portals || []);
@@ -279,13 +288,24 @@ export class Game {
       await this.loadWorld(id, true);
       const def = this.world.def || {};
       const s = def.start || { x: 0, z: 0, heading: 0 };
-      const y = this.sea.meanHeight(s.x, s.z) + 0.3;
+      // Submarine worlds swap the player's boat for a sub; surface worlds swap it back.
+      const wantSub = !!def.underwater && !!this.mods.Submarine?.SubPhysics;
+      if (wantSub !== !!this.player.body.isSub) {
+        const old = this.player;
+        this.player = wantSub ? await this.spawnSub(s.x, s.y ?? 0, s.z, s.heading || 0)
+          : await this.spawnBoat(this.selectedBoat, s.x, s.z, s.heading || 0, this.selectedColor);
+        this.removeBoat(old);
+        if (!wantSub) this.wake?.attach?.(this.player);
+      }
+      this.camera.mode = wantSub ? 'sub' : 'boat';
+      const y = wantSub ? (s.y ?? this.sea.meanHeight(s.x, s.z)) : this.sea.meanHeight(s.x, s.z) + 0.3;
       this.player.body.setPose(s.x, y, s.z, s.heading || 0);
       this.camera.orbit = null;
       this.camera.follow(this.player.body);
       this.sea.setFocus(s.x, s.z);
-      if (def.gates?.length && this.mods.Race?.Race) {
-        this.race = new this.mods.Race.Race(this, def, { laps: def.laps ?? 3 });
+      const RaceClass = wantSub ? this.mods.SubRace?.SubRace : this.mods.Race?.Race;
+      if (def.gates?.length && RaceClass) {
+        this.race = new RaceClass(this, def, { laps: def.laps ?? 3 });
         this._wireRace(this.race);
         await this.race.setup?.();
         for (const b of this.boats) { b.body.groundFn = this.world.heightAt || null; if (b !== this.player) this.wake?.attach?.(b); }
@@ -376,6 +396,34 @@ export class Game {
     return boat;
   }
 
+  /** Create a submarine (player or AI) at a 3D position. */
+  async spawnSub(x, y, z, heading = 0, colorIndex = 0) {
+    const S = this.mods.Submarine;
+    const body = new S.SubPhysics();
+    body.groundFn = this.world?.heightAt || null;
+    body.ceilingFn = (px, pz) => this.sea.heightAt(px, pz);
+    const group = new THREE.Group();
+    let visual = null;
+    try { visual = await S.buildSubVisual({ atmosphere: this.app.atmosphere, colorIndex, game: this }); }
+    catch (e) { console.warn('[game] sub visual failed', e); }
+    if (!visual) visual = this.placeholderHull({ width: 1.6, length: 6 });
+    group.add(visual);
+    this.scene.add(group);
+    body.setPose(x, y, z, heading);
+    group.position.copy(body.position);
+    group.quaternion.copy(body.quaternion);
+    const sub = { name: 'sub', hull: body.hull, body, group, visual, colorIndex, isSub: true };
+    this.boats.push(sub);
+    return sub;
+  }
+
+  /** Underwater look on/off (only meaningful in submarine worlds). */
+  _setSubmerged(on) {
+    if (this._submerged === on) return;
+    this._submerged = on;
+    this.mods.SubmarineWorld?.setSubmerged?.(this.app, on, this.world?.def?.fog);
+  }
+
   removeBoat(boat) {
     if (!boat) return;
     this.scene.remove(boat.group);
@@ -386,6 +434,7 @@ export class Game {
   }
 
   placeholderHull(hull) {
+    hull = { width: 2, length: 6, ...hull };
     const g = new THREE.BoxGeometry(hull.width, hull.width * 0.45, hull.length);
     const m = new PropMaterial({ color: 0xff7a1a, roughness: 0.4 }, this.app.atmosphere);
     const mesh = new THREE.Mesh(g, m);
@@ -428,7 +477,8 @@ export class Game {
         b.throttle = c.throttle;
         b.steer = c.steer;
         b.boost = c.boost ? 1 : 0;
-      } else { b.throttle = 0; b.steer = 0; b.boost = 0; }
+        if (b.isSub) b.dive = c.dive;
+      } else { b.throttle = 0; b.steer = 0; b.boost = 0; if (b.isSub) b.dive = 0; }
       if (c.has('reset')) b.reset();
       if (c.has('camera')) this.camera.nextView();
       if (c.has('horn')) this.audio?.horn?.(this.player.name);
@@ -453,6 +503,12 @@ export class Game {
     }
 
     this.race?.update?.(dt);
+    this.mods.Worlds?.updateWorldEvents?.(this.app, this.world?.def, dt);
+    this.world?.update?.(dt, this.app.camera);
+    if (this.world?.def?.underwater) {
+      const cam = this.app.camera.position;
+      this._setSubmerged(this.sea.heightAt(cam.x, cam.z) - cam.y > 0.3);
+    }
     this.portals?.update?.(dt);
     if (this.portals?.test && this.driving && this.player && !this._transitioning) {
       const dest = this.portals.test(this.player.body);
@@ -487,6 +543,9 @@ export class Game {
       f.nextGateDir = r?.nextGateDir?.() ?? 0;
       f.progress = r?.player?.progress ?? 0;
       f.finished = !!r?.player?.finished;
+      f.submerged = !!b.isSub;
+      f.depth = b.isSub ? Math.max(0, b.depth || 0) : 0;
+      f.nextGatePitch = r?.nextGatePitch?.() ?? 0;
       this.hud.update(f);
     }
 

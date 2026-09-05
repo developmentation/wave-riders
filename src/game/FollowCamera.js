@@ -32,6 +32,8 @@ export class FollowCamera {
     this._first = true;
     this.enabled = true;
     this.orbit = null; // {angle, dist, height} for garage / title
+    this.mode = 'boat'; // 'boat' | 'sub' (3D follow, may go under the surface)
+    this._subUp = new THREE.Vector3(0, 1, 0);
   }
 
   follow(boat) { this.boat = boat; this._first = true; }
@@ -56,6 +58,8 @@ export class FollowCamera {
       this._apply(dt, o.fov ?? 40);
       return;
     }
+
+    if (this.mode === 'sub') { this._updateSub(dt); return; }
 
     const view = VIEWS[this.viewIndex];
     // Heading lags the hull so wave yaw does not whip the camera.
@@ -83,6 +87,31 @@ export class FollowCamera {
 
     const fov = view.fov + speedK * 8;
     this._apply(dt, fov);
+  }
+
+  /** Submarine: follow in 3D, stay under the surface while the sub is under. */
+  _updateSub(dt) {
+    const b = this.boat, L = b.hull?.length || 6;
+    let dh = b.heading - this.headingSmooth;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    this.headingSmooth += dh * (this._first ? 1 : 1 - Math.exp(-dt * 3));
+    const pitch = THREE.MathUtils.clamp(b.pitch || 0, -0.6, 0.6) * 0.5;
+    const fx = Math.sin(this.headingSmooth), fz = Math.cos(this.headingSmooth);
+    const dist = L * 2.2, height = L * 0.7;
+    _v.set(b.position.x - fx * dist, b.position.y + height - Math.sin(pitch) * dist * 0.5, b.position.z - fz * dist);
+    const surf = this.sea.heightAt(_v.x, _v.z);
+    const depth = (b.depth ?? (surf - b.position.y));
+    if (depth > 2.5) {
+      // Under water: keep the lens at least 2 m below the surface so the frame never straddles it.
+      if (_v.y > surf - 2.0) _v.y = surf - 2.0;
+      const floor = b.groundFn ? b.groundFn(_v.x, _v.z) + 2.5 : -1e9;
+      if (_v.y < floor) _v.y = floor;
+    } else if (_v.y < surf + 1.6) _v.y = surf + 1.6;
+    const k = this._first ? 1 : 1 - Math.exp(-dt * 5);
+    this.pos.lerp(_v, k);
+    _look.set(b.position.x + fx * L * 1.2, b.position.y + Math.sin(pitch) * L * 1.2, b.position.z + fz * L * 1.2);
+    this.look.lerp(_look, this._first ? 1 : 1 - Math.exp(-dt * 7));
+    this._apply(dt, 58);
   }
 
   _apply(dt, fovTarget) {
