@@ -82,6 +82,9 @@ export class Game {
     app.post.settings.bloom = false;
     // Fill any gap between wave rows with water-coloured sky (no submerged pass in game mode).
     if (app.surfaceOnly) app.sky.bgMaterial.uniforms.uSeaFill.value = 1;
+    let matte = this.params.get('matte');
+    if (matte === null) { try { matte = localStorage.getItem('waveriders.matte'); } catch (_) { matte = null; } }
+    if (matte && matte !== '0') this.setMatte(true);
 
     const [Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam, SubmarineWorld, Submarine, SubRace] = await Promise.all([
       optional('./Boats.js'), optional('./Worlds.js'), optional('./Hud.js'), optional('./Audio.js'),
@@ -205,6 +208,7 @@ export class Game {
     h.on('horn', () => this.audio?.horn?.(this.player?.name));
     h.on('exit', () => { this.resume(true); this.enterWorld('hub'); });
     h.on('raceAgain', () => { if (this.world) this.enterWorld(this.world.id); });
+    h.on('matte', () => this.setMatte(!this.matte));
     h.on('garage', () => { this.resume(true); this.enterWorld('hub').then(() => this.showGarage()); });
   }
 
@@ -223,6 +227,14 @@ export class Game {
     this.app.paused = false;
     if (!silent) this.hud?.show(this.state === 'race' ? 'race' : 'hub');
     this.audio?.resume?.();
+  }
+
+  /** Water look: shiny (default) or matte grey topography, remembered per browser. */
+  setMatte(on) {
+    this.matte = !!on;
+    this.app.oceanMesh.setMatte(this.matte ? (this.params.get('matte') === '2' ? 2 : 1) : 0);
+    this.hud?.root?.classList.toggle('wr-matte', this.matte);
+    try { localStorage.setItem('waveriders.matte', this.matte ? '1' : '0'); } catch (_) { /* ignore */ }
   }
 
   toggleMute() {

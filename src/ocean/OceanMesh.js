@@ -882,6 +882,19 @@ void main(){
 #endif
   color += uAmbientFlash * uLightningColor * (0.02 + foam * 0.35 + F * 0.25);
 
+#ifdef MATTE
+  {
+    // Matte topography view (settings toggle): a grey Lambert surface with no
+    // reflections or foam, plus faint 2 m contour bands so wave shapes read.
+    float nl = max(dot(N, L), 0.0);
+    vec3 grey = vec3(0.62, 0.64, 0.66);
+    color = grey * (sun * nl / PI_S + skyAmb * 1.1);
+    color *= 0.92 + 0.08 * smoothstep(0.45, 0.55, fract(vWorldPos.y * 0.5));
+    #if MATTE == 2
+    if (uNearPatch > 0.5) color *= vec3(1.0, 0.8, 0.8);   // diagnostics: tint the near patch
+    #endif
+  }
+#endif
   // ------------------------------------------------------ aerial perspective
   vec2 screenUv = gl_FragCoord.xy / uResolution;
   vec4 ap = sampleAerial(screenUv, vDist);
@@ -1030,6 +1043,17 @@ export class OceanMesh {
    * Switch the GAME_LITE fragment path on or off. Both surface materials are
    * recompiled on the next frame; nothing else about the mesh changes.
    */
+  /** Matte grey topography look (1) or with near-patch diagnostic tint (2); 0/false = normal. */
+  setMatte(mode) {
+    const m = mode === true ? 1 : (mode | 0);
+    if ((this.matte | 0) === m) return;
+    this.matte = m;
+    for (const mat of [this.material, this.nearMaterial]) {
+      if (m) mat.defines.MATTE = m; else delete mat.defines.MATTE;
+      mat.needsUpdate = true;
+    }
+  }
+
   setLite(on) {
     on = !!on;
     if (this.lite === on) return;

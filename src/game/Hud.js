@@ -57,6 +57,7 @@ const ICON = {
   chevron: svg('<path d="M50 4 90 48H66v46H34V48H10z" fill="currentColor" stroke="#05324f" stroke-width="7" stroke-linejoin="round"/>', '0 0 100 100'),
   camera: svg('<path d="M4 8h4l2-3h4l2 3h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z" fill="currentColor"/><circle cx="12" cy="14" r="3.5" fill="#05324f"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>'),
   pause: svg('<rect x="5" y="4" width="5" height="16" rx="1.5" fill="currentColor"/><rect x="14" y="4" width="5" height="16" rx="1.5" fill="currentColor"/>'),
+  water: svg('<path d="M12 3c-3.5 5-7 8.2-7 12a7 7 0 0 0 14 0c0-3.8-3.5-7-7-12z" fill="currentColor"/><path d="M9.5 15.5a2.5 2.5 0 0 0 2.5 2.5" fill="none" stroke="#05324f" stroke-width="1.8" stroke-linecap="round"/>'),
   home: svg('<path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10.5V20h12v-9.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="#05324f"/>'),
   play: svg('<path d="M7 4.5v15l13-7.5z" fill="currentColor"/>'),
   reset: svg('<path d="M20 12a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M20 3v6h-6z" fill="currentColor"/>'),
@@ -276,6 +277,7 @@ export class Hud {
           <button class="wr-sysbtn" data-act="mute" aria-label="Sound">${ICON.sound}</button>
           <button class="wr-sysbtn wr-tiltbtn" data-act="tilt" aria-label="Tilt steering">${ICON.tilt}</button>
           <button class="wr-sysbtn" data-act="fullscreen" aria-label="Fullscreen">${ICON.full}</button>
+          <button class="wr-sysbtn wr-mattebtn" data-act="matte" aria-label="Water look: shiny or matte">${ICON.water}</button>
         </div>
       </div>`);
     paused.dataset.screen = 'paused';
@@ -434,6 +436,7 @@ export class Hud {
       case 'garage': this.emit('garage'); break;
       case 'mute': this.setMuted(!this.muted); this.emit('mute', this.muted); break;
       case 'tilt': this.setTilt(!this.tilt); break;
+      case 'matte': this.emit('matte'); break;
       case 'fullscreen': this._fullscreen(); this.emit('fullscreen'); break;
       default: this.emit(name, btn);
     }

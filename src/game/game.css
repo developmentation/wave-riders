@@ -137,6 +137,7 @@
 /* Leave-the-race button: only meaningful during a race. */
 #hud:not([data-screen="race"]) .wr-homebtn { display: none; }
 .wr-homebtn { color: var(--wr-yellow); }
+#hud.wr-matte .wr-mattebtn { color: var(--wr-yellow); background: linear-gradient(180deg, #1d9be0, #0a5c8d); }
 
 /* ------------------------------------------------------------------ title */
 .wr-title { flex-direction: column; align-items: center; justify-content: center; gap: clamp(8px, 2vmin, 24px); pointer-events: auto; }
