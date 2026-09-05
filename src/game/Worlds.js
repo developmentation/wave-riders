@@ -172,7 +172,7 @@ const storm = {
     },
   },
   // Auto-exposure would lift an overcast sky to flat grey; hold it down so the squall reads dark.
-  exposure: 0.45,
+  exposure: 0.7,
   water: { scatter: [0.010, 0.042, 0.052], absorb: [0.003, 0.012, 0.022] },
   islands: [
     // one big crescent wrapping the far side of the bay

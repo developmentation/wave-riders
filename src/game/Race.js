@@ -22,7 +22,7 @@ const DEFAULT_WIDTH = 24;
 const PILLAR_R = 1.0;
 const PILLAR_H = 5.0;           // buoy pillar from 1.5 m below water to 3.5 m above
 const PILLAR_BASE = -1.5;
-const ARCH_TUBE = 0.7;
+const ARCH_TUBE = 1.1;
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
@@ -302,11 +302,11 @@ export class Race {
       bannerPlain: mk({ color: 0xff7a1a, emissive: em(0.5, 0.15, 0.0), roughness: 0.7, flagWave: 2.5, side: THREE.DoubleSide }),
       bannerFinish: mk({ map: bannerChecker, color: 0xffffff, emissive: em(0.2, 0.2, 0.2), roughness: 0.7, flagWave: 2.5, side: THREE.DoubleSide }),
       // Arch + lamp caps per state.
-      plainNext: mk({ color: 0x3aff62, emissive: em(0.25, 3.0, 0.45), roughness: 0.4 }),
+      plainNext: mk({ color: 0x3aff62, emissive: em(0.4, 5.0, 0.7), roughness: 0.4 }),
       plainAfter: mk({ color: 0xf6f6f6, emissive: em(0.5, 0.5, 0.5), roughness: 0.45 }),
       plainFar: mk({ color: 0xc9d0d6, emissive: em(0.22, 0.22, 0.22), roughness: 0.5 }),
       plainDim: mk({ color: 0x5a636c, emissive: em(0, 0, 0), roughness: 0.6 }),
-      finishNext: mk({ map: checker, color: 0xa8ffb8, emissive: em(0.15, 1.6, 0.3), roughness: 0.4 }),
+      finishNext: mk({ map: checker, color: 0xa8ffb8, emissive: em(0.25, 2.6, 0.5), roughness: 0.4 }),
       finishAfter: mk({ map: checker, color: 0xffffff, emissive: em(0.4, 0.4, 0.4), roughness: 0.45 }),
       finishFar: mk({ map: checker, color: 0xd8dde2, emissive: em(0.2, 0.2, 0.2), roughness: 0.5 }),
       finishDim: mk({ map: checker, color: 0x6a727a, emissive: em(0, 0, 0), roughness: 0.6 }),

@@ -68,8 +68,13 @@ export class Game {
     app.cine.setFree(false);
     app.cine.shot = null;
     // Hold 60: the adaptive loop tolerates +25 %, so aim a little under 16.7.
-    app.quality.targetMs = 14;
-    app.quality.minScale = 0.65;
+    app.quality.targetMs = 15;
+    app.quality.minScale = 0.6;
+    app.quality.canUpgrade = true;
+    // First seconds are shader compiles, not steady state: do not shed tiers on them.
+    app.quality._cooldown = 6.0;
+    // Bloom at strength 0.055 is invisible on the water and costs half a millisecond.
+    app.post.settings.bloom = false;
     // Fill any gap between wave rows with water-coloured sky (no submerged pass in game mode).
     if (app.surfaceOnly) app.sky.bgMaterial.uniforms.uSeaFill.value = 1;
 
@@ -264,7 +269,8 @@ export class Game {
       this.race = null;
       // Keep only the player's boat.
       for (const b of [...this.boats]) if (b !== this.player) this.removeBoat(b);
-      await this.loadWorld(id, false);
+      // The white-out hides the switch, so the new sky and sea arrive fully formed.
+      await this.loadWorld(id, true);
       const def = this.world.def || {};
       const s = def.start || { x: 0, z: 0, heading: 0 };
       const y = this.sea.meanHeight(s.x, s.z) + 0.3;

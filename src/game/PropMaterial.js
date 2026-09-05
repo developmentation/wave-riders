@@ -34,6 +34,7 @@ uniform mat4 uViewProjNJ;
 uniform mat4 uPrevViewProjNJ;
 uniform vec3 uCamPos;
 uniform float uTime;
+uniform float uDt;
 uniform float uWave;
 out vec3 vWorld;
 out vec3 vNormal;
@@ -43,12 +44,17 @@ out vec4 vClipNJ;
 out vec4 vPrevClipNJ;
 void main(){
   vec3 p = position;
+  vec3 pPrev = position;
   #ifdef FLAG_WAVE
-  // Cloth flutter for flags and sails: only vertices flagged by uv.y.
-  p.x += sin(uTime * 6.0 + position.z * 3.0 + position.y * 2.0) * 0.08 * uWave * uv.y;
+  // Cloth flutter for flags and sails: only vertices flagged by uv.y. The
+  // previous-frame position carries the same flutter one step back so the
+  // motion vectors are right and TAA does not ghost the cloth.
+  float flutter = 0.08 * uWave * uv.y;
+  p.x += sin(uTime * 6.0 + position.z * 3.0 + position.y * 2.0) * flutter;
+  pPrev.x += sin((uTime - uDt) * 6.0 + position.z * 3.0 + position.y * 2.0) * flutter;
   #endif
   vec4 wp = modelMatrix * vec4(p, 1.0);
-  vec4 pwp = uPrevModelMatrix * vec4(p, 1.0);
+  vec4 pwp = uPrevModelMatrix * vec4(pPrev, 1.0);
   vWorld = wp.xyz;
   vNormal = normalize(mat3(modelMatrix) * normal);
   vUv = uv;
@@ -178,7 +184,7 @@ export class PropMaterial extends THREE.RawShaderMaterial {
     };
     if (atmosphere) atmosphere.bind(uniforms);
     // Shared frame/lighting uniforms win over the private copies bind() created.
-    for (const k of ['uTime', 'uCamPos', 'uResolution', 'uViewProjNJ', 'uPrevViewProjNJ', 'uSunDir', 'uSunColor',
+    for (const k of ['uTime', 'uDt', 'uCamPos', 'uResolution', 'uViewProjNJ', 'uPrevViewProjNJ', 'uSunDir', 'uSunColor',
       'uSunIntensity', 'uEnvMap', 'uEnvMaxLod', 'uLightning0', 'uLightning1', 'uLightningColor', 'uAmbientFlash',
       'uFogDensity', 'uSeaLevel']) uniforms[k] = U[k];
     super({

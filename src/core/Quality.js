@@ -38,17 +38,17 @@ export const PRESETS = {
   // (volumetric cloud steps, DoF, motion blur, particle counts) trimmed hard so
   // an integrated GPU holds 60 fps. Adaptive scaling still applies below it.
   game: {
-    label: 'GAME', renderScale: 1.0, maxPixelRatio: 1.0,
+    label: 'GAME', renderScale: 0.9, maxPixelRatio: 1.0,
     oceanGridX: 160, oceanGridY: 100, fftSize: 128,
     cloudScale: 0.3, cloudSteps: 24, cloudLightSteps: 3, cloudEnabled: true,
-    sprayCount: 6000, rainCount: 8000, dof: false, motionBlur: false, taa: true,
+    sprayCount: 6000, rainCount: 14000, dof: false, motionBlur: false, taa: true,
     envSize: 128, envCloudSteps: 8, spoutSteps: 24,
   },
   gamelow: {
-    label: 'GAME LOW', renderScale: 0.85, maxPixelRatio: 1.0,
+    label: 'GAME LOW', renderScale: 1.0, maxPixelRatio: 1.0,
     oceanGridX: 128, oceanGridY: 84, fftSize: 128,
-    cloudScale: 0.25, cloudSteps: 12, cloudLightSteps: 2, cloudEnabled: true,
-    sprayCount: 3000, rainCount: 5000, dof: false, motionBlur: false, taa: true,
+    cloudScale: 0.25, cloudSteps: 20, cloudLightSteps: 2, cloudEnabled: true,
+    sprayCount: 3000, rainCount: 9000, dof: false, motionBlur: false, taa: true,
     envSize: 128, envCloudSteps: 6, spoutSteps: 16,
   },
 };
@@ -86,6 +86,8 @@ export class Quality {
     // Lowest dynamic resolution scale the loop may choose. The game raises it:
     // a quarter-resolution sea reads as mud, so it sheds cloud/particle tiers first.
     this.minScale = MIN_SCALE;
+    // Allow climbing back to a richer tier when there is headroom (the game turns this on).
+    this.canUpgrade = false;
   }
 
   setPreset(name, scale = 1.0) {
@@ -96,6 +98,13 @@ export class Quality {
   }
 
   get effectiveScale() { return this.renderScale * this.dynamicScale; }
+
+  /** Name of the next richer preset in the same ladder, or null at the top. */
+  tierAbove() {
+    const tiers = GAME_TIERS.includes(this.presetName) ? GAME_TIERS : TIERS;
+    const i = tiers.indexOf(this.presetName);
+    return i > 0 ? tiers[i - 1] : null;
+  }
 
   /** Name of the preset n tiers cheaper, clamped to the bottom. Null if there. */
   tierBelow(n) {
@@ -187,6 +196,12 @@ export class Quality {
       this.dynamicScale = Math.max(this.minScale, this.dynamicScale - 0.09);
       this._cooldown = 0.9;
     } else if (avg < this.targetMs * 0.68) {
+      if (this.dynamicScale >= 0.999 && this.canUpgrade) {
+        // Comfortably under budget at full scale: climb a tier, but land on a
+        // reduced scale so a wrong guess costs a step down, not a stall.
+        const tier = this.tierAbove();
+        if (tier && this.onDowngrade) { this.onDowngrade(tier, 0.8); this._cooldown = 5.0; return true; }
+      }
       this.dynamicScale = Math.min(1.0, this.dynamicScale + 0.045);
       this._cooldown = 1.5;
     }
