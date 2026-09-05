@@ -14,6 +14,8 @@ Wave Riders is built on top of [ABYSSAL — The Living Deep](https://github.com/
 
 ## Play
 
+**Play online:** https://developmentation.github.io/wave-riders/ (GitHub Pages, built from `main`).
+
 ```sh
 npm ci
 npm run dev        # http://localhost:5173/  (game)   http://localhost:5173/explore.html (ocean explorer)
@@ -67,7 +69,7 @@ harbour), `?skip=lagoon|swell|storm|giant|tempest|deep` (straight into a race), 
 
 A procedural expansion of [ABYSSAL by Token-Gremlin](https://github.com/Token-Gremlin/natural-disasters). Begin at sea level, floating with the waves. Dive into a sunlit reef, a kelp forest, the continental slope and a 1,400-metre trench, all grown together from one seed. Swim through the waterline into the sky, or follow the canyon into the dark.
 
-[**Explore the living deep**](https://abyssal-living-deep.netlify.app/)
+[**Explore the living deep**](https://abyssal-living-deep.netlify.app/) (the original engine's demo)
 
 ![The sea-level opening, with a direct route into the reef](docs/media/living-surface.jpg)
 

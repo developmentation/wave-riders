@@ -27,3 +27,6 @@ desktop.ini
 *.log
 npm-debug.log*
 yarn-error.log*
+
+# Third-party reference screenshots used for design review only; not distributed
+docs/reference/
