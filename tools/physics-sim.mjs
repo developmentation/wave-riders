@@ -1,9 +1,9 @@
 // Headless boat-physics check: full throttle for 5 s, then full right lock. Prints speed, heading, yaw rate and bank per second.
-// node tools/physics-sim.mjs
+// node tools/physics-sim.mjs [hull,hull,...]
 import { BoatPhysics, HULLS } from '../src/game/BoatPhysics.js';
 import * as THREE from 'three';
 const sea = { lastDhdt: 0, sample(x, z, out) { return out.set(0, 0, 0); }, heightAt() { return 0; } };
-for (const name of ['speedboat', 'jetski']) {
+for (const name of (process.argv[2] ? process.argv[2].split(',') : ['speedboat', 'jetski', 'fishing', 'tug', 'airboat', 'towboat', 'rowboat'])) {
   const b = new BoatPhysics(HULLS[name], sea);
   b.setPose(0, 0, 0, 0);
   const dt = 1 / 60; let t = 0, last = 0;

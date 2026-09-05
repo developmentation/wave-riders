@@ -53,6 +53,47 @@ export const HULLS = {
     buoyancyPoints: [[-1.0, -0.26, 3.2], [1.0, -0.26, 3.2], [-1.0, -0.26, 0], [1.0, -0.26, 0], [-1.0, -0.26, -3.2], [1.0, -0.26, -3.2]],
     label: 'Pontoon',
   },
+  // Kenney boat-fishing-small: a chunky displacement hull, very steady, ~35 km/h.
+  fishing: {
+    length: 6.0, width: 2.6, mass: 1800, draft: 0.55,
+    thrust: 12000, maxSpeed: 10.6, steerTorque: 0.6, rudderLift: 2.2, maxYaw: 0.8,
+    dragLong: 0.07, dragLat: 1.9, planing: 0.15, roll: 0.5, bounce: 0.7,
+    buoyancyPoints: [[0, -0.41, 2.6], [-0.9, -0.41, 0.9], [0.9, -0.41, 0.9], [-0.95, -0.41, -1.2], [0.95, -0.41, -1.2], [0, -0.41, -2.6]],
+    label: 'Fishing Boat',
+  },
+  // Kenney boat-tug-a/b/c: slow, heavy, shoulders through waves, barely rolls, ~28 km/h.
+  tug: {
+    length: 6.0, width: 3.0, mass: 3400, draft: 0.7,
+    thrust: 17000, maxSpeed: 8.6, steerTorque: 1.0, rudderLift: 4.5, maxYaw: 0.75,
+    dragLong: 0.1, dragLat: 2.4, planing: 0.0, roll: 0.35, bounce: 1.4,
+    buoyancyPoints: [[0, -0.52, 2.6], [-1.05, -0.52, 0.9], [1.05, -0.52, 0.9], [-1.1, -0.52, -1.2], [1.1, -0.52, -1.2], [0, -0.52, -2.6]],
+    label: 'Tugboat',
+  },
+  // Kenney boat-fan: flat-bottomed airboat, fast, very little lateral grip, ~75 km/h.
+  airboat: {
+    length: 5.0, width: 3.0, mass: 700, draft: 0.25,
+    thrust: 9500, maxSpeed: 28, steerTorque: 1.0, rudderLift: 0.14, maxYaw: 1.4,
+    dragLong: 0.04, dragLat: 0.3, planing: 0.9, roll: 0.35, bounce: 1.1,
+    buoyancyPoints: [[-0.9, -0.185, 2.1], [0.9, -0.185, 2.1], [-1.1, -0.185, 0], [1.1, -0.185, 0], [-1.0, -0.185, -2.1], [1.0, -0.185, -2.1]],
+    label: 'Airboat',
+  },
+  // Kenney boat-tow-a/b: wakeboard tow boat, speedboat class with a wider, heavier hull, ~85 km/h.
+  towboat: {
+    length: 7.0, width: 3.0, mass: 1900, draft: 0.5,
+    thrust: 23000, maxSpeed: 31, steerTorque: 0.65, rudderLift: 0.3, maxYaw: 1.0,
+    dragLong: 0.05, dragLat: 1.5, planing: 0.8, roll: 1.0, bounce: 1.0,
+    buoyancyPoints: [[0, -0.37, 3.1], [-1.15, -0.37, 1.1], [1.15, -0.37, 1.1], [-1.25, -0.37, -1.3], [1.25, -0.37, -1.3], [0, -0.37, -3.1]],
+    label: 'Tow Boat',
+  },
+  // Kenney boat-row-small: a kid rowing. Silly slow (~12 km/h) but turns on the spot.
+  rowboat: {
+    length: 3.2, width: 1.5, mass: 220, draft: 0.22,
+    thrust: 950, maxSpeed: 3.9, steerTorque: 2.0, rudderLift: 0.3, maxYaw: 1.1,
+    // High longitudinal drag: the oars have to keep pushing at cruise, which is what gives the big steer authority.
+    dragLong: 0.28, dragLat: 1.6, planing: 0.0, roll: 0.6, bounce: 0.6,
+    buoyancyPoints: [[0, -0.163, 1.35], [-0.55, -0.163, 0.3], [0.55, -0.163, 0.3], [-0.5, -0.163, -1.0], [0.5, -0.163, -1.0], [0, -0.163, -1.4]],
+    label: 'Rowboat',
+  },
 };
 
 export class BoatPhysics {

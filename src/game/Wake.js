@@ -23,10 +23,14 @@ const ROWS = 48;                       // stored stern samples
 const LIFE = 4.0;                      // seconds a row stays visible
 const MIN_SPACING = 0.6;               // metres of travel between rows
 const KELVIN = Math.tan(19.47 * Math.PI / 180);
-const SPRAY_MAX = 300;                 // pooled sprites per boat
+const SPRAY_MAX = 360;                 // pooled sprites per boat
 const G = 9.81;
 const ROOSTER_KMH = 40;
 const SURF_LIFT = 0.10;                // ribbon sits this far above the sampled sea
+const SKIRT_SEG = 24;                  // outline samples around the hull
+const SKIRT_RINGS = 3;                 // under the hull, on the outline, outer edge
+const SKIRT_LIFT = 0.10;               // skirt sits this far above the sampled sea at Hs 0 (+0.09 m per metre of Hs)
+const SKIRT_V = [0, 0.4, 1];           // across-coordinate of each ring for the shader
 
 // ------------------------------------------------------------------ shaders
 // Lighting is evaluated per vertex: the sun transmittance LUT and the nine-tap
@@ -238,8 +242,107 @@ void main(){
 }
 `;
 
+// Hull foam skirt: three concentric rings of the hull outline (one tucked
+// under the hull, one on the outline, one SKIRT_W outward) laid on the sampled
+// sea. It paints over the hard hull/water intersection the way the aerated
+// boundary layer around a moving hull does, so a wave face never reads as a
+// clean cut through the boat.
+const SKIRT_VERT = /* glsl */ `
+precision highp float;
+precision highp sampler2D;
+${ATMO_COMMON}
+${SHADING_GLSL}
+${LIGHT_GLSL}
+in vec3 position;
+in vec4 aData;        // v (0 inner .. 1 outer edge), around01 (0 bow, 0.5 stern), strength, pulse
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+uniform mat4 uViewProjNJ;
+uniform mat4 uPrevViewProjNJ;
+out vec3 vWorld;
+out vec4 vData;
+out vec3 vWhite;
+out vec3 vSkyAmb;
+out vec4 vClipNJ;
+out vec4 vPrevClipNJ;
+void main(){
+  vWorld = position;
+  vData = aData;
+  vWhite = foamRadiance(vSkyAmb);
+  vec4 wp = vec4(position, 1.0);
+  vClipNJ = uViewProjNJ * wp;
+  vPrevClipNJ = uPrevViewProjNJ * wp;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+const SKIRT_FRAG = /* glsl */ `
+precision highp float;
+precision highp sampler2D;
+${HAZE_GLSL}
+uniform sampler2D uFoamTex;
+uniform float uTime;
+in vec3 vWorld;
+in vec4 vData;
+in vec3 vWhite;
+in vec3 vSkyAmb;
+in vec4 vClipNJ;
+in vec4 vPrevClipNJ;
+layout(location = 0) out vec4 oColor;
+layout(location = 1) out vec4 oVelocity;
+void main(){
+  float v = vData.x;
+  float strength = vData.z;
+  float pulse = vData.w;
+  float around = cos(vData.y * 6.2831853);      // 1 at the stem, -1 at the transom
+  // Solid where it tucks under the hull, dissolving outward. The bow quarter
+  // throws the most water at speed; the transom churn is always there.
+  float body = 1.0 - smoothstep(0.40, 1.0, v);
+  float bow = smoothstep(0.2, 1.0, around) * (0.08 + 0.30 * strength);
+  float stern = smoothstep(0.3, 1.0, -around) * (0.10 + 0.20 * strength);
+  float density = body * (0.28 + 0.60 * strength + bow + stern + pulse * 0.6);
+  if (density < 0.08) discard;
+
+  // World-space taps: the foam stays in the water and streams aft as the hull
+  // drives through it, and the transom end joins the wake ribbon seamlessly.
+  vec4 fx = texture(uFoamTex, vWorld.xz * 0.30 + vec2(uTime * 0.02, -uTime * 0.015));
+  vec4 fx2 = texture(uFoamTex, vWorld.xz * 0.95 - vec2(uTime * 0.05, uTime * 0.035));
+  float clusters = fx.r * 0.55 + fx2.r * 0.45;
+  float bubbles = fx2.g * 0.6 + fx.g * 0.4;
+  float dissolve = fx.a * 0.5 + fx2.a * 0.5;
+
+  float noise = smoothstep(0.14, 0.78, dissolve * 0.5 + clusters * 0.5);
+  // Carve hard: the raft texture must open holes through the sheet or the
+  // skirt reads as a white cut-out around the hull instead of froth on water.
+  float carved = density * (0.18 + noise * 1.25);
+  // survival threshold rises outward: a ragged, lacy outer edge instead of a ring
+  float onset = 0.24 + v * 0.42;
+  float foam = smoothstep(onset, onset + 0.30, carved);
+  foam *= mix(0.30, 1.0, bubbles);
+  // wet edge: a thin aerated veil hugging the hull that never fully clears,
+  // broken up by the fine texture so it is froth rather than a painted line
+  float veil = (1.0 - smoothstep(0.22, 0.60, v)) * (0.20 + 0.35 * strength) * (0.35 + 0.65 * noise);
+  float a = max(foam, veil);
+  if (a < 0.004) discard;
+
+  float dist = length(vWorld - uCamPos);
+  vec3 col = vWhite * (1.0 + 0.25 * bubbles + 0.25 * pulse + 0.15 * bow);
+  col = applyHaze(col, vSkyAmb, dist);
+
+  oColor = vec4(col, clamp(a, 0.0, 1.0) * 0.86);
+  vec2 cur = vClipNJ.xy / max(vClipNJ.w, 1e-6);
+  vec2 prv = vPrevClipNJ.xy / max(vPrevClipNJ.w, 1e-6);
+  oVelocity = vec4((cur - prv) * 0.5, dist, 1.0);
+}
+`;
+
 const SHARED_KEYS = ['uTime', 'uCamPos', 'uResolution', 'uViewProjNJ', 'uPrevViewProjNJ', 'uSunDir', 'uSunColor',
   'uSunIntensity', 'uEnvMap', 'uEnvMaxLod', 'uFogDensity', 'uFoamTex', 'uAtmoTurbidity', 'uAtmoMieG', 'uAtmoGroundAlbedo'];
+
+/** Shared by ShoreFoam.js so every foam surface in the game is lit the same way. */
+export const FOAM_LIGHT_GLSL = LIGHT_GLSL;
+export const FOAM_HAZE_GLSL = HAZE_GLSL;
+export { makeMaterial as makeFoamMaterial };
 
 function makeMaterial(name, vert, frag, atmosphere) {
   const uniforms = {};
@@ -313,6 +416,46 @@ class BoatWake {
     this.spray = new THREE.Points(sg, wake.sprayMaterial);
     this.spray.frustumCulled = false;
     this.spray.renderOrder = 2;
+
+    // ---- hull foam skirt: a static outline in hull space, re-laid on the sea each frame
+    // Superellipse outline: pointier forward (n = 1.6) than aft (n = 3.0) so
+    // the ring reads as a boat, not a pill. (lx, lz) is the waterline point,
+    // (nx, nz) its outward direction in hull space (+z forward, +x starboard).
+    this.oLx = new Float32Array(SKIRT_SEG); this.oLz = new Float32Array(SKIRT_SEG);
+    this.oNx = new Float32Array(SKIRT_SEG); this.oNz = new Float32Array(SKIRT_SEG);
+    const halfW = hull.width * 0.5, halfL = hull.length * 0.5;
+    for (let s = 0; s < SKIRT_SEG; s++) {
+      const th = (s / SKIRT_SEG) * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
+      const n = c > 0 ? 1.6 : 3.0, e = 2 / n;
+      const lx = halfW * Math.sign(sn) * Math.pow(Math.abs(sn), e);
+      const lz = halfL * Math.sign(c) * Math.pow(Math.abs(c), e);
+      let nx = lx / (halfW * halfW), nz = lz / (halfL * halfL);
+      const len = Math.hypot(nx, nz) || 1; nx /= len; nz /= len;
+      this.oLx[s] = lx; this.oLz[s] = lz; this.oNx[s] = nx; this.oNz[s] = nz;
+    }
+    this.skirtBase = 0.40 + 0.30 * hull.width;   // metres outward at rest
+    this.skirtStr = 0; this.pulse = 0; this.chineAcc = 0;
+
+    const kg = new THREE.BufferGeometry();
+    const kv = SKIRT_SEG * SKIRT_RINGS;
+    this.kPos = new THREE.BufferAttribute(new Float32Array(kv * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.kData = new THREE.BufferAttribute(new Float32Array(kv * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    kg.setAttribute('position', this.kPos);
+    kg.setAttribute('aData', this.kData);
+    const kidx = new Uint16Array(SKIRT_SEG * (SKIRT_RINGS - 1) * 6);
+    let o = 0;
+    for (let r = 0; r < SKIRT_RINGS - 1; r++) {
+      for (let s = 0; s < SKIRT_SEG; s++) {
+        const s1 = (s + 1) % SKIRT_SEG;
+        const a = r * SKIRT_SEG + s, b = r * SKIRT_SEG + s1, c = (r + 1) * SKIRT_SEG + s, d = (r + 1) * SKIRT_SEG + s1;
+        kidx[o++] = a; kidx[o++] = c; kidx[o++] = b; kidx[o++] = b; kidx[o++] = c; kidx[o++] = d;
+      }
+    }
+    kg.setIndex(new THREE.BufferAttribute(kidx, 1));
+    kg.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+    this.skirt = new THREE.Mesh(kg, wake.skirtMaterial);
+    this.skirt.frustumCulled = false;
+    this.skirt.renderOrder = 1.5;        // after the ribbon it grows out of, before the airborne spray
   }
 
   _lay(x, z, rxv, rzv, strength) {
@@ -376,14 +519,56 @@ class BoatWake {
       this.rPos.addUpdateRange(0, v * 3); this.rData.addUpdateRange(0, v * 4);
     }
 
+    // ---- hull foam skirt
+    // strength eases in and out so a hull skipping off a crest does not flicker
+    const wet = b.submersion > 0 ? 1 : 0;
+    const strTarget = wet * THREE.MathUtils.clamp(0.22 + b.wakeStrength * 0.9 + THREE.MathUtils.smoothstep(speed, 1, 9) * 0.5, 0, 1);
+    this.skirtStr += (strTarget - this.skirtStr) * Math.min(1, dt * (strTarget < this.skirtStr ? 5 : 8));
+    this.pulse = Math.max(this.pulse * Math.exp(-dt * 3), b.slapImpulse);
+    const kStr = this.skirtStr, kPulse = Math.min(1, this.pulse);
+    this.skirt.visible = kStr > 0.02;
+    if (this.skirt.visible) {
+      const KP = this.kPos.array, KD = this.kData.array;
+      const outer = this.skirtBase * (0.7 + 0.55 * kStr + 0.8 * kPulse);
+      // The probe grid smooths the short cascades, so in a big sea the drawn
+      // surface stands above the sampled one: lift the skirt with Hs or it z-fails.
+      const lift = Math.min(0.45, SKIRT_LIFT + 0.09 * (this.hs || 0));
+      // planing bow rides clear of the water: pull the forward part of the ring aft with pitch
+      const bowUp = THREE.MathUtils.clamp(b.forward.y, 0, 0.4);
+      const px = b.position.x, pz = b.position.z;
+      let k = 0;
+      for (let r = 0; r < SKIRT_RINGS; r++) {
+        const vv = SKIRT_V[r];
+        // ring 0 is tucked under the hull so the paint straddles the intersection line
+        const scale = r === 0 ? 0.68 : 1.02;
+        const out = r === SKIRT_RINGS - 1 ? outer : 0;
+        for (let s = 0; s < SKIRT_SEG; s++) {
+          let lz = this.oLz[s] * scale + this.oNz[s] * out;
+          const lx = this.oLx[s] * scale + this.oNx[s] * out;
+          if (lz > 0) lz *= 1 - bowUp * 0.9;
+          const x = px + _r.x * lx + _f.x * lz, z = pz + _r.z * lx + _f.z * lz;
+          KP[k * 3] = x; KP[k * 3 + 1] = sea.heightAt(x, z) + lift; KP[k * 3 + 2] = z;
+          KD[k * 4] = vv; KD[k * 4 + 1] = s / SKIRT_SEG; KD[k * 4 + 2] = kStr; KD[k * 4 + 3] = kPulse;
+          k++;
+        }
+      }
+      this.kPos.needsUpdate = true; this.kData.needsUpdate = true;
+    }
+
     // ---- spray emission
     const kmh = b.speedKmh;
-    const bowRate = 75 * THREE.MathUtils.smoothstep(speed, 3, 13) * (0.5 + 0.5 * b.wakeStrength) * (b.submersion > 0 ? 1 : 0);
+    const bowRate = 75 * THREE.MathUtils.smoothstep(speed, 3, 13) * (0.5 + 0.5 * b.wakeStrength) * wet;
     this.emitAcc += bowRate * dt;
     while (this.emitAcc >= 1) {
       this.emitAcc -= 1;
       // a sheet peels off the chine from the stem back to midships
       for (let side = -1; side <= 1; side += 2) this._emitBow(side, speed, hull, 0.0, Math.random() * 0.8);
+    }
+    // low, wide sheets skimming off both chines: these wrap the hull edges in white at speed
+    this.chineAcc += 80 * THREE.MathUtils.smoothstep(speed, 3.5, 14) * (0.6 + 0.4 * b.wakeStrength) * wet * dt;
+    while (this.chineAcc >= 1) {
+      this.chineAcc -= 1;
+      for (let side = -1; side <= 1; side += 2) this._emitChine(side, speed, hull);
     }
     if (this.planing && kmh > ROOSTER_KMH && b.submersion > 0) {
       this.roosterAcc += 45 * THREE.MathUtils.smoothstep(kmh, ROOSTER_KMH, ROOSTER_KMH + 35) * dt;
@@ -452,6 +637,30 @@ class BoatWake {
       0.5 + r3 * 0.5 + kind * 0.3, (0.34 + r1 * 0.42) * (1 + kind * 0.6) * Math.sqrt(W / 2.3), kind);
   }
 
+  /**
+   * Chine spray: a flat sheet skimming sideways off the hull between the stem
+   * and midships. Low and short-lived, so it stays glued to the waterline and
+   * broadens the hull's white edge rather than flying.
+   */
+  _emitChine(side, speed, hull) {
+    const b = this.body;
+    const L = hull.length, W = hull.width;
+    const r1 = Math.random(), r2 = Math.random(), r3 = Math.random();
+    const a = 0.05 + r3 * 0.55;                         // 0 = stem .. 1 = stern
+    const fwd = L * (0.42 - a * 0.9);
+    const beam = W * (a < 0.15 ? 0.30 + a * 1.0 : 0.46);
+    _v.copy(b.position).addScaledVector(_f, fwd).addScaledVector(_r, side * beam);
+    _v.y = this.sea.heightAt(_v.x, _v.z) + 0.03;
+    const out = (0.9 + speed * 0.11) * (0.6 + r1 * 0.7);
+    const up = (0.35 + speed * 0.045) * (0.4 + r2 * 0.8);
+    const along = speed * (0.55 + r2 * 0.2);
+    this._spawn(_v.x, _v.y, _v.z,
+      _f.x * along + _r.x * side * out + (r2 - 0.5) * 0.5,
+      up,
+      _f.z * along + _r.z * side * out + (r1 - 0.5) * 0.5,
+      0.28 + r3 * 0.30, (0.28 + r1 * 0.34) * Math.sqrt(W / 2.3), 0.5);
+  }
+
   /** Rooster tail: a narrow column thrown up behind the transom by the drive. */
   _emitRooster(speed, hull) {
     const b = this.body;
@@ -469,6 +678,7 @@ class BoatWake {
   dispose() {
     this.ribbon.geometry.dispose();
     this.spray.geometry.dispose();
+    this.skirt.geometry.dispose();
   }
 }
 
@@ -481,33 +691,36 @@ export class Wake {
     this.ribbonMaterial = makeMaterial('WakeRibbon', RIBBON_VERT, RIBBON_FRAG, game.app.atmosphere);
     this.sprayMaterial = makeMaterial('WakeSpray', SPRAY_VERT, SPRAY_FRAG, game.app.atmosphere);
     this.sprayMaterial.side = THREE.FrontSide;
+    this.skirtMaterial = makeMaterial('WakeSkirt', SKIRT_VERT, SKIRT_FRAG, game.app.atmosphere);
   }
 
   /** @param {{ body: import('./BoatPhysics.js').BoatPhysics, group: THREE.Group }} boat */
   attach(boat) {
     if (!boat?.body || this.wakes.has(boat)) return;
     const w = new BoatWake(boat, this);
-    this.scene.add(w.ribbon, w.spray);
+    this.scene.add(w.ribbon, w.spray, w.skirt);
     this.wakes.set(boat, w);
   }
 
   detach(boat) {
     const w = this.wakes.get(boat);
     if (!w) return;
-    this.scene.remove(w.ribbon, w.spray);
+    this.scene.remove(w.ribbon, w.spray, w.skirt);
     w.dispose();
     this.wakes.delete(boat);
   }
 
   update(dt) {
     if (dt <= 0) return;
-    for (const w of this.wakes.values()) w.update(dt);
+    const hs = this.game.app.ocean?.significantWaveHeight || 0;
+    for (const w of this.wakes.values()) { w.hs = hs; w.update(dt); }
   }
 
   dispose() {
     for (const boat of [...this.wakes.keys()]) this.detach(boat);
     this.ribbonMaterial.dispose();
     this.sprayMaterial.dispose();
+    this.skirtMaterial.dispose();
   }
 }
 

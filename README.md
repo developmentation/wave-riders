@@ -25,7 +25,7 @@ npm run build      # static site in dist/
 | Boost / horn | Space / H | ⚡ / 📣 | B / A |
 | Camera / reset boat / pause | C / R / Esc | 📷 / 🔄 / ⏸ | X / Y / Start |
 
-URL switches for testing: `?boat=jetski|speedboat|sailboat|pontoon`, `?skip=title` (straight to the
+URL switches for testing: `?boat=jetski|speedboat|sailboat|pontoon|fishing|tug|airboat|towboat|rowboat`, `?skip=title` (straight to the
 harbour), `?skip=lagoon|swell|storm` (straight into a race), `?debug=1` (physics/perf overlay),
 `?profile=1` (GPU pass timings), `?preset=game|gamelow`, `?touch=1` (force touch controls),
 `?mods=Name,Name` (load `src/game/<Name>.js` dev hooks).
@@ -37,7 +37,8 @@ harbour), `?skip=lagoon|swell|storm` (straight into a race), `?debug=1` (physics
   can float every hull on N buoyancy points with real slap, roll, planing and outboard-style
   steering; `PropMaterial.js` lights boats/islands/gates inside the engine's HDR multi-target
   pipeline (sun through the atmospheric transmittance LUT, sky irradiance probe, aerial perspective,
-  motion vectors for TAA); `Worlds.js` / `Islands.js` build procedural islands and courses;
+  motion vectors for TAA); `Worlds.js` / `Islands.js` build procedural islands and courses; `ShoreFoam.js`
+  traces each island's waterline for an animated surf band; `Wake.js` adds the wake, a hull foam skirt and spray;
   `Portals.js`, `Race.js`, `Wake.js`, `Hud.js`, `Audio.js` (all sound is WebAudio synthesis) and
   `Game.js` tie it together. See `docs/GAME-DESIGN.md` for the brief, quality bar and module contract.
 - **Engine changes** are small and additive: a surface-only mode in `src/core/App.js` (the game
@@ -49,7 +50,8 @@ harbour), `?skip=lagoon|swell|storm` (straight into a race), `?debug=1` (physics
 
 ## Art and licenses
 
-- Boats (speedboats, sailboats), buoys, gates and ramps: **Kenney — Watercraft Kit**, CC0 1.0
+- Nine boats: jet ski and pontoon (procedural), speedboat, sailboat, fishing boat, tugboat, airboat, tow boat and rowboat (Kenney GLBs with procedural drivers).
+- Boats (speedboats, sailboats, tug, fishing, airboat, tow, rowboat), buoys, gates and ramps: **Kenney — Watercraft Kit**, CC0 1.0
   (public domain), in `public/models/kenney-watercraft/` with its license file. https://kenney.nl/assets/watercraft-kit
 - Jet ski, pontoon, driver figures, islands, portals, gates, HUD art: generated in code (no downloaded assets).
 - No audio files: engines, water, chimes and music are synthesized at runtime.

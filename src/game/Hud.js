@@ -28,7 +28,15 @@ export const DEFAULT_BOATS = [
   { id: 'speedboat', label: 'Speedboat', icon: '🚤', description: 'The fastest boat!', colors: ['#ff9f1a', '#ff5d5d', '#4dc3ff', '#f4f4f4'], stats: { speed: 1.0, turning: 0.6, steady: 0.55 } },
   { id: 'sailboat', label: 'Sailboat', icon: '⛵', description: 'Rides the wind.', colors: ['#f4f4f4', '#ffd84d', '#46e07a', '#c58cff'], stats: { speed: 0.45, turning: 0.4, steady: 0.7 } },
   { id: 'pontoon', label: 'Pontoon', icon: '🛥️', description: 'Steady party boat!', colors: ['#4dc3ff', '#ff9f1a', '#46e07a', '#ff8fd0'], stats: { speed: 0.35, turning: 0.35, steady: 1.0 } },
+  { id: 'fishing', label: 'Fishing Boat', icon: '🎣', description: 'Steady as a rock!', colors: ['#5a8fdd', '#d84c48', '#49c687', '#ffc236'], stats: { speed: 0.4, turning: 0.45, steady: 0.9 } },
+  { id: 'tug', label: 'Tugboat', icon: '🚢', description: 'Big and strong!', colors: ['#d84c48', '#49c687', '#ffc236'], stats: { speed: 0.3, turning: 0.4, steady: 1.0 } },
+  { id: 'airboat', label: 'Airboat', icon: '🌀', description: 'Fast and slidey!', colors: ['#49c687', '#ff7a3d', '#9d6cf0', '#a9d9fb'], stats: { speed: 0.85, turning: 0.75, steady: 0.35 } },
+  { id: 'towboat', label: 'Tow Boat', icon: '⛴️', description: 'Twin smokestacks!', colors: ['#9d6cf0', '#ff7a3d'], stats: { speed: 0.95, turning: 0.55, steady: 0.6 } },
+  { id: 'rowboat', label: 'Rowboat', icon: '🚣', description: 'Row, row, row!', colors: ['#d84c48', '#ffc236', '#49c687', '#9d6cf0'], stats: { speed: 0.15, turning: 0.9, steady: 0.5 } },
 ];
+
+/** Catalog colours may be numeric hex (Kenney palette); CSS wants strings. */
+const cssColor = (c) => (typeof c === 'number' ? `#${c.toString(16).padStart(6, '0')}` : c);
 
 const WORLD_ICONS = [
   { id: 'lagoon', icon: '☀️', label: 'Sunny Lagoon' },
@@ -456,6 +464,7 @@ export class Hud {
     } else if (list && typeof list === 'object') {
       this.boats = Object.entries(list).map(([id, b]) => ({ ...DEFAULT_BOATS.find((d) => d.id === id), id, ...b }));
     }
+    for (const b of this.boats) if (Array.isArray(b.colors)) b.colors = b.colors.map(cssColor);
     if (!this.boats.some((b) => b.id === this.selectedBoat)) this.selectedBoat = this.boats[0].id;
     this._renderCards();
   }
@@ -531,7 +540,11 @@ export class Hud {
       this.el.wrong.classList.remove('is-on');
     }
     if (name === 'results') this._showResults(data || {});
-    if (name === 'garage') this._renderSwatches();
+    if (name === 'garage') {
+      this._renderSwatches();
+      // The card strip scrolls once there are more boats than fit; bring the chosen one into view.
+      this.el.cards.querySelector('.is-sel')?.scrollIntoView?.({ inline: 'center', block: 'nearest' });
+    }
     if (name === 'paused') this.emit('paused');
   }
 

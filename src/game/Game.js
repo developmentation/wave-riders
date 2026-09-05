@@ -82,11 +82,12 @@ export class Game {
     // Fill any gap between wave rows with water-coloured sky (no submerged pass in game mode).
     if (app.surfaceOnly) app.sky.bgMaterial.uniforms.uSeaFill.value = 1;
 
-    const [Boats, Worlds, Hud, Audio, Race, Portals, Wake] = await Promise.all([
+    const [Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam] = await Promise.all([
       optional('./Boats.js'), optional('./Worlds.js'), optional('./Hud.js'), optional('./Audio.js'),
-      optional('./Race.js'), optional('./Portals.js'), optional('./Wake.js'),
+      optional('./Race.js'), optional('./Portals.js'), optional('./Wake.js'), optional('./ShoreFoam.js'),
     ]);
-    this.mods = { Boats, Worlds, Hud, Audio, Race, Portals, Wake };
+    this.mods = { Boats, Worlds, Hud, Audio, Race, Portals, Wake, ShoreFoam };
+    if (ShoreFoam?.ShoreFoam) this.shoreFoam = new ShoreFoam.ShoreFoam(this);
 
     if (Audio?.GameAudio) {
       this.audio = new Audio.GameAudio();
@@ -259,6 +260,7 @@ export class Game {
       this.world = { id, def: { id, start: { x: 0, z: 0, heading: 0 }, portals: [], gates: [] }, heightAt: () => -50, dispose() {} };
     }
     this.world.id = id;
+    this.shoreFoam?.build?.(this.world);
     for (const b of this.boats) b.body.groundFn = this.world.heightAt || null;
     this.portals?.build?.(this.world.def?.portals || []);
     this.weatherKey = this.world.def?.weather?.key || this.weatherKey;
@@ -457,6 +459,7 @@ export class Game {
       if (dest) this.enterWorld(dest);
     }
     this.wake?.update?.(dt);
+    this.shoreFoam?.update?.(dt);
 
     // Audio
     if (this.audio?.setEngine && this.player) {

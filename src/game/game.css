@@ -189,9 +189,10 @@
 .wr-garage-row { display: flex; align-items: center; gap: clamp(8px, 1.6vmin, 20px); width: 100%; max-width: 1500px; }
 .wr-cycle { flex: none; width: var(--btn); height: var(--btn); border-radius: 50%; padding: calc(var(--btn) * 0.18); color: var(--ink); background: linear-gradient(180deg, #ffe66e, #ffb42e); border: 4px solid #fff; box-shadow: 0 5px 0 #b86e00, 0 10px 20px rgba(0, 0, 0, 0.35); }
 .wr-cycle:active { transform: translateY(4px); box-shadow: 0 1px 0 #b86e00; }
-.wr-cards { display: flex; flex: 1 1 0; min-width: 0; gap: clamp(8px, 1.6vmin, 20px); justify-content: safe center; align-items: stretch; overflow-x: auto; scrollbar-width: none; padding: clamp(10px, 2vmin, 24px) 10px; }
+.wr-cards { display: flex; flex: 1 1 0; min-width: 0; gap: clamp(8px, 1.6vmin, 20px); justify-content: safe center; align-items: stretch; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; padding: clamp(10px, 2vmin, 24px) 10px; }
 .wr-cards::-webkit-scrollbar { display: none; }
 .wr-boat {
+  scroll-snap-align: center;
   --boat-color: #ff9f1a;
   flex: 1 1 0; min-width: clamp(140px, 17vw, 300px); max-width: 320px;
   display: flex; flex-direction: column; align-items: center; gap: clamp(2px, 0.8vmin, 10px);
@@ -206,7 +207,7 @@
 .wr-boat.is-sel { transform: scale(1.06); border-color: var(--wr-yellow); box-shadow: 0 0 0 clamp(4px, 0.7vmin, 7px) rgba(255, 216, 77, 0.35), 0 6px 0 rgba(0, 0, 0, 0.3), 0 20px 50px rgba(0, 0, 0, 0.4); background: linear-gradient(180deg, rgba(30, 130, 210, 0.92), rgba(8, 60, 110, 0.95)); }
 .wr-boat-icon { font-size: clamp(56px, 11vmin, 120px); line-height: 1.05; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.45)); transition: transform 0.25s; }
 .wr-boat.is-sel .wr-boat-icon { animation: wr-bob 2s ease-in-out infinite; }
-.wr-boat-name { font-size: clamp(22px, 3.8vmin, 40px); }
+.wr-boat-name { font-size: clamp(22px, 3.8vmin, 40px); max-width: 100%; text-align: center; line-height: 1.05; }
 .wr-boat-desc { font-size: clamp(13px, 2vmin, 20px); font-weight: 800; color: #cfefff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .wr-stats { display: flex; flex-direction: column; gap: clamp(3px, 0.6vmin, 8px); width: 100%; margin-top: clamp(4px, 1vmin, 12px); }
 .wr-stat { display: grid; grid-template-columns: 1.4em 4.2em 1fr; align-items: center; gap: 0.35em; font-size: clamp(12px, 1.9vmin, 19px); }
@@ -364,6 +365,7 @@
   .wr-keys { bottom: calc(var(--sab) + 10px + clamp(140px, 24vmin, 200px) + 12px); }
   .wr-garage { gap: 6px; }
   .wr-boat-icon { font-size: clamp(44px, 9vmin, 80px); }
+  .wr-boat-name { font-size: clamp(19px, 3.4vmin, 40px); }
   .wr-stat { font-size: 12px; }
   .wr-results-card { gap: 8px; }
   .wr-star { width: clamp(60px, 11vmin, 100px); height: clamp(60px, 11vmin, 100px); }
