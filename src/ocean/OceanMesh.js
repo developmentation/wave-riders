@@ -743,6 +743,15 @@ void main(){
   // sum — adding them triple-counts a crest that all three see.
   float rawFoam = max(max(t0.r * 0.75, t1.r), t2.r * 0.45);
   float bubbles = t0.g * 0.35 + t1.g * 0.7 + t2.g * 0.3;
+#ifdef GAME_LITE
+  // The crest channel is the *instantaneous* breaking criterion (Jacobian fold
+  // or Stokes-limit steepness on the lee face, OceanFFT ASSEMBLE_FRAG), before
+  // any accumulation. The accumulated foam integrates a rate and in a gale
+  // equilibrates near 0.05-0.3, so a whitecap keyed off it alone is either
+  // late or, with the gain turned up, a snowfield; the fold marks the crest
+  // that is breaking this frame and rawFoam the one that broke a second ago.
+  float fold = max(max(t0.b * 0.75, t1.b), t2.b * 0.6);
+#endif
 
   float foamMask = (rawFoam * uFoamStrength + vCrest * 0.8) * (1.0 - vCalm * 0.9);
 
@@ -764,20 +773,99 @@ void main(){
                          gx * 0.145 * stretch, gy * 0.145 * stretch);
   vec4 fx2 = textureGrad(uFoamTex, q * 0.62 + vec2(-t * 0.03, t * 0.021), ddx * 0.62, ddy * 0.62);
 #endif
+  float foamFine = fx2.g * 0.6 + fx1.g * 0.4;
 #ifdef GAME_LITE
-  // The thirty-metre windrow octave only feeds the erosion noise. Its alpha
-  // averages one half, so its mean stands in for it: the rafts keep their
-  // medium and fine structure and lose only the slow drift in raft density
-  // along the wind, which from a boat is below the coverage variation the
-  // simulation itself produces.
-  float foamNoise = 0.25 + fx1.a * 0.42 + fx2.a * 0.22;
+  // ------------------------------------------------------ froth (game mode)
+  // Three kinds of white water, each keyed to the stage of a break the
+  // turbulence texture records, instead of one grey smear thresholded from
+  // the accumulated coverage.
+  //
+  // The windrow octave (fx0 in the explorer) is not sampled here; in its place
+  // one fine tap stretched six times along the wind. Its tile is 12 m downwind
+  // by 2 m across, so every feature in it is a streak, and it costs what the
+  // omitted tap did.
+  vec4 fx3 = texture(uFoamTex, qs * vec2(0.085, 0.50) - vec2(t * 0.016, t * 0.006));
+  float covN = clamp(uWhitecapCoverage / 0.16, 0.0, 1.0);
+  float calmK = 1.0 - vCalm * 0.9;
+
+  // 1. Whitecap. The spectrum here travels against uWindDir (positive
+  //    exponent in both the time step and the inverse transform), so the face
+  //    ahead of a crest -- the one that steepens and spills -- has its height
+  //    gradient along the wind, which is also the face the simulation injects
+  //    foam on. Weight the cap onto it, with the lip (slope ~ 0) getting a bit
+  //    over half so the cap wraps the crest line rather than stopping at it.
+  float fdn = dot(slope, wd) / (length(slope) + 0.06);
+  // Per-pixel breaking. The derivative taps carry the horizontal displacement
+  // gradients (lx, lz), so their sum is the surface convergence -- the trace
+  // of the same Jacobian the simulation folds on, at pixel rather than texel
+  // resolution and continuous in time where the sim's fold is a duty cycle
+  // that covers a few percent of a 23 m/s sea. In that sea convergence above
+  // 0.8 marks ~10% of the surface in ragged crest-line streaks, above 1.4 ~1%.
+  // The knee slides with Monahan coverage: in a trade wind only the most
+  // compressed crest in sight spills (a few scattered caps), in a full gale
+  // every crest past the storm knee does; a light breeze breaks nothing.
+  float conv = -(dsum.z + dsum.w);
+  float spillKnee = mix(1.9, 0.95, smoothstep(0.0, 0.9, covN));
+  float spill = smoothstep(spillKnee, spillKnee + 0.6, conv) * smoothstep(0.003, 0.02, covN);
+  float capFace = clamp(0.62 + 0.55 * fdn, 0.0, 1.0);
+  // Gains are set from the simulation's steady state in a 23 m/s sea: the
+  // fold runs 0.25-0.75 in short crest-line streaks, the accumulated foam
+  // 0.02-0.10 and the bubble raft 0.02-0.07 (fold duty is a few percent, and
+  // both channels integrate a rate), so the accumulated channels are read at
+  // roughly ten times the gain of the instantaneous one.
+  // A knee on the fold: a texel that is only starting to steepen (fold 0.1-0.2)
+  // must not seed a cap through a bright texel of the tile, or the sea fills
+  // with confetti between the real breakers.
+  float foldS = smoothstep(0.12, 0.60, fold);
+  float capSrc = (foldS * 1.3 + spill * 0.85 + rawFoam * 9.0 * uFoamStrength) * capFace * calmK
+               + vCrest * 0.9 * calmK;
+  // Ragged edges from the raft clusters at two scales: fx1 is the metre-scale
+  // rafts stretched along the wind, fx2 the 10-30 cm cells.
+  float capTex = fx1.r * 0.55 + fx2.r * 0.45;
+  float capCarve = capSrc * (0.40 + capTex * 1.15);
+  // Monahan coverage decides how readily a break goes white: near-nothing in
+  // a light breeze, every fold in a full gale.
+  float capOn = mix(0.60, 0.34, covN);
+  float cap = smoothstep(capOn, capOn + 0.20, capCarve);
+  // opaque core where the carve is well over the threshold, textured rim outside
+  float capCore = smoothstep(capOn + 0.28, capOn + 0.62, capCarve);
+
+  // 2. Wind streaks. Foam the last few breaks left behind (rawFoam, ~2 s) and
+  //    the older raft (bubbles, tens of seconds) pulled into lines along the
+  //    wind by the stretched tile; as the source decays the threshold breaks
+  //    the sheet into thinner and fewer streaks.
+  // The bubble channel never drains to zero (exponential decay only), so
+  // after the world's start-up transient it carries a diffuse floor of ~0.01
+  // everywhere; every reading of it goes through a knee just above that.
+  float raft = smoothstep(0.02, 0.065, bubbles);
+  float streakSrc = (rawFoam * 7.0 + raft * 0.6) * uFoamStrength * calmK
+                  * smoothstep(0.02, 0.30, covN);
+  float streakPat = smoothstep(0.50, 0.80, fx3.b * 0.6 + fx3.a * 0.4);
+  float streak = smoothstep(0.24, 0.55, streakSrc * 1.4) * streakPat * (0.55 + 0.45 * fx3.r);
+
+  // 3. Bubble rafts in the wake of a break: a low-coverage lace of specks
+  //    (the 10-30 cm cluster cells) with dark holes between, on the slow
+  //    bubble channel, so it outlives the streaks by tens of seconds. Past a
+  //    footprint of a few tens of centimetres the specks cannot resolve and
+  //    the lace stands at its mean, a light texture rather than a shimmer.
+  float raftMask = raft * uFoamStrength * calmK * smoothstep(0.01, 0.20, covN);
+  float lacePat = smoothstep(0.50, 0.72, fx2.r * (0.7 + 0.5 * fx2.g) * (0.8 + 0.4 * fx3.r));
+  lacePat = mix(lacePat, 0.28, smoothstep(0.12, 0.60, fpShade));
+  float lace = lacePat * raftMask;
+
+  // 4. Aerated water around and under the froth: entrained bubbles turn the
+  //    body's few-percent blue reflectance into a brighter, greyer one. Used
+  //    in the scattering term below; no taps of its own.
+  float aer = clamp(rawFoam * 8.0 + raft * 0.8 + foldS * 0.5 + spill * 0.3, 0.0, 1.0)
+            * calmK * smoothstep(0.01, 0.20, covN);
+
+  float foam = max(cap, streak * 0.8);
+  float foamThin = max(streak, lace);
 #else
   vec4 fx0 = textureGrad(uFoamTex, qs * 0.031 * stretch + vec2(t * 0.004, -t * 0.003),
                          gx * 0.031 * stretch, gy * 0.031 * stretch);
   float foamNoise = fx0.a * 0.5 + fx1.a * 0.42 + fx2.a * 0.22;
-#endif
   float foamDetail = fx1.r * 0.55 + fx2.r * 0.45;
-  float foamFine = fx2.g * 0.6 + fx1.g * 0.4;
 
   // Monahan whitecap coverage sets how easily a raft survives: a light breeze
   // leaves nothing behind, a storm keeps the sea streaked between breakers.
@@ -789,6 +877,7 @@ void main(){
   float foam = smoothstep(onset, onset + 0.30, carved);
   foam *= mix(0.35, 1.0, foamDetail);
   float foamThin = smoothstep(onset * 0.55, onset + 0.30, carved);
+#endif
 
   // foam perturbs the normal too
   N = normalize(N + vec3(fx2.r - fx2.b, 0.0, fx2.g - fx2.a) * foam * 0.35 * microFade);
@@ -872,6 +961,14 @@ void main(){
 
   // Entrained bubbles keep scattering for a while after the crest has broken.
   scatter += bodyR * bubbles * 0.55 * (skyAmb * 1.6 + sun * 0.10);
+#ifdef GAME_LITE
+  // Aerated water. A raft of bubbles a few centimetres down scatters the
+  // downwelling light back out nearly white, so the body under and around
+  // thick foam brightens several-fold and loses most of its colour; that
+  // halo is what makes a whitecap read as a volume rather than a decal.
+  vec3 milk = (beam * 0.45 + skyAmb) * vec3(0.16, 0.20, 0.23);
+  scatter = mix(scatter, milk, aer * 0.5);
+#endif
 
   // Whatever little climbs back out of the deep water below.
   vec3 deep = uWaterAbsorb * skyAmb * 0.8;
@@ -938,6 +1035,34 @@ void main(){
 #endif
 
   // ---------------------------------------------------------------- foam mat
+#ifdef GAME_LITE
+  if (foam > 0.002 || foamThin > 0.002) {
+    // The same Lambert mat the explorer and the boat wake use: bright albedo
+    // under sun (wrapped, a raft is not flat) plus sky; nothing here exceeds
+    // the full-albedo raft.
+    vec3 foamAlbedo = vec3(0.93, 0.96, 0.985);
+    float wrapNoL = clamp((dot(N, L) + 0.45) / 1.45, 0.0, 1.0);
+    vec3 foamLit = foamAlbedo * (sun * wrapNoL * 0.30 + skyAmb * 0.95);
+    // Whitecap: opaque white core, the rim shaded by the raft texture (the
+    // clusters self-shadow), a little sun forward-scattered through the rim.
+    vec3 capCol = foamLit * mix(mix(0.62, 1.0, foamFine), 1.0, capCore);
+    float fwd = clamp(dot(V, -L), 0.0, 1.0); fwd = fwd * fwd * fwd;
+    capCol += foamAlbedo * sun * fwd * 0.10 * foamFine * (1.0 - capCore);
+    vec3 fspec = vec3(0.0);
+    if (NoL > 0.0) {
+      vec3 H = normalize(L + V);
+      float NoH = max(dot(N, H), 0.0);
+      float aF = 0.55;
+      fspec = sun * ggxD(NoH, aF) * smithGGXCorrelated(NoV, max(NoL, 1e-4), aF) * 0.04 * NoL;
+    }
+    color = mix(color, capCol + fspec, cap);
+    // Wind streaks: a thin sheet, most of the way to white, over the water.
+    color = mix(color, foamLit * 0.90, streak * (1.0 - cap) * 0.85);
+    // Bubble lace: translucent specks that lift the water and dull its
+    // mirror without painting it.
+    color = mix(color, foamLit * 0.82, lace * (1.0 - cap) * (1.0 - streak * 0.5) * 0.62);
+  }
+#else
   if (foam > 0.002 || foamThin > 0.002) {
     float foamAO = mix(0.62, 1.0, foamFine);
     vec3 foamAlbedo = vec3(0.93, 0.96, 0.985) * foamAO;
@@ -957,6 +1082,7 @@ void main(){
     // the water a little and kills the specular, it does not turn it white.
     color = mix(color, mix(color, foamLit, 0.20), foamThin * (1.0 - foam));
   }
+#endif
 
   // Living light is emitted by the disturbed water and foam. Applying it
   // before the foam layer would cover it with unlit foam on a moonless night.
