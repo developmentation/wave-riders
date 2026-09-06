@@ -274,6 +274,8 @@ export class Hud {
         <button class="wr-big wr-yellow" data-act="garage"><span>🚤</span><span>Change boat</span></button>
         <button class="wr-big wr-blue" data-act="exit"><span>⚓</span><span>Back to harbour</span></button>
         <div class="wr-pause-row">
+          <button class="wr-sysbtn" data-act="camera" aria-label="Camera">${ICON.camera}</button>
+          <button class="wr-sysbtn" data-act="reset" aria-label="Reset boat">${ICON.reset}</button>
           <button class="wr-sysbtn" data-act="mute" aria-label="Sound">${ICON.sound}</button>
           <button class="wr-sysbtn wr-tiltbtn" data-act="tilt" aria-label="Tilt steering">${ICON.tilt}</button>
           <button class="wr-sysbtn" data-act="fullscreen" aria-label="Fullscreen">${ICON.full}</button>

@@ -388,3 +388,28 @@
   .wr-results-card { gap: 8px; }
   .wr-star { width: clamp(60px, 11vmin, 100px); height: clamp(60px, 11vmin, 100px); }
 }
+
+/* ------------------------------------------------------------ phones ------
+   Landscape phones (viewport under ~520 CSS px tall): fewer, smaller controls.
+   Steering by arrows only (no wheel), pause + home only in the system row (the
+   rest lives in the pause menu), a small dial, and the depth chip up top. */
+@media (max-height: 520px) {
+  #hud.wr { --btn: 54px; --sys: 40px; --pad: 8px; }
+  #hud.wr .wr-wheel { display: none; }
+  #hud.wr .wr-left { bottom: calc(var(--sab) + 10px); left: calc(var(--sal) + 10px); }
+  #hud.wr .wr-arrows { gap: 8px; }
+  #hud.wr .wr-right { grid-template-columns: 44px 62px; grid-template-rows: 44px 84px; gap: 8px; bottom: calc(var(--sab) + 10px); right: calc(var(--sar) + 10px); }
+  #hud.wr .wr-round { width: 44px; height: 44px; padding: 9px; border-width: 3px; }
+  #hud.wr .wr-pedal span { font-size: 12px; }
+  #hud.wr .wr-badge { font-size: 17px; }
+  #hud.wr .wr-gate { width: 44px; height: 44px; }
+  #hud.wr .wr-speedo { width: 96px; height: 96px; bottom: 6px; box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3), 0 8px 16px rgba(0, 0, 0, 0.4); }
+  #hud.wr .wr-speedo-digit { font-size: 22px; }
+  #hud.wr .wr-sys { top: calc(var(--sat) + 8px + 46px); right: calc(var(--sar) + 8px); margin-top: 0; gap: 6px; }
+  #hud[data-screen="hub"].wr .wr-sys { top: calc(var(--sat) + 8px); }
+  #hud.wr .wr-sys .wr-sysbtn[data-act="camera"], #hud.wr .wr-sys .wr-sysbtn[data-act="reset"], #hud.wr .wr-sys .wr-sysbtn[data-act="mute"] { display: none; }
+  #hud.wr .wr-depth { left: 50%; transform: translateX(-50%); bottom: auto; top: calc(var(--sat) + 8px + 44px); font-size: 15px; }
+  #hud.wr .wr-hub .wr-card { padding: 8px 14px; }
+  #hud.wr .wr-keys { display: none; }
+  #hud.wr .wr-toasts { font-size: 18px; }
+}
